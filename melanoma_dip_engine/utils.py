@@ -6,7 +6,9 @@ This module provides helper functions for visualization, metrics, and debugging.
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
-from typing import Tuple
+from typing import Tuple, Dict, Any, Optional
+from sklearn.cluster import KMeans
+from skimage.feature import local_binary_pattern
 
 
 def calculate_dice_coefficient(true_mask: np.ndarray, pred_mask: np.ndarray) -> float:
@@ -490,3 +492,291 @@ def save_analysis_report(features: dict, output_path: str) -> None:
         f.write("Always consult with a qualified healthcare professional.\n")
     
     print(f"✅ Analysis report saved to: {output_path}")
+
+
+def visualize_asymmetry(mask: np.ndarray) -> np.ndarray:
+    """
+    Visualize asymmetry by showing original mask, flipped mask, and XOR difference.
+
+    This function provides visual evidence for the asymmetry score by:
+    1. Showing the original lesion mask
+    2. Showing the horizontally flipped mask
+    3. Highlighting areas of asymmetry using XOR operation
+
+    Args:
+        mask (np.ndarray): Binary mask of the segmented lesion
+
+    Returns:
+        np.ndarray: RGB visualization showing asymmetry analysis
+
+    DIP Concepts:
+        - XOR Operation: Highlights non-overlapping regions between original and flipped masks
+        - Symmetry Analysis: Visual proof of asymmetry measurements
+        - Color Coding: Red highlights asymmetric regions for easy interpretation
+    """
+    # Create RGB visualization
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Original mask
+    axes[0].imshow(mask, cmap='gray')
+    axes[0].set_title('Original Lesion Mask', fontweight='bold')
+    axes[0].axis('off')
+
+    # Horizontally flipped mask
+    flipped_mask = cv2.flip(mask, 1)
+    axes[1].imshow(flipped_mask, cmap='gray')
+    axes[1].set_title('Horizontally Flipped Mask', fontweight='bold')
+    axes[1].axis('off')
+
+    # XOR to show asymmetry (areas that don't overlap)
+    xor_result = cv2.bitwise_xor(mask, flipped_mask)
+
+    # Create colored visualization (red for asymmetric areas)
+    asymmetry_viz = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+    asymmetry_viz[mask > 0] = [200, 200, 200]  # Gray for lesion
+    asymmetry_viz[xor_result > 0] = [255, 0, 0]  # Red for asymmetric areas
+
+    axes[2].imshow(asymmetry_viz)
+    axes[2].set_title('Asymmetry Visualization (Red = Asymmetric)', fontweight='bold')
+    axes[2].axis('off')
+
+    plt.tight_layout()
+
+    # Convert plot to numpy array - FIXED for different matplotlib backends
+    fig.canvas.draw()
+    
+    # Handle different matplotlib backends
+    if hasattr(fig.canvas, 'tostring_rgb'):
+        viz_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    else:
+        # Alternative method for different backends
+        viz_array = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+        viz_array = viz_array[:, :, :3]  # Remove alpha channel
+    
+    plt.close(fig)
+
+    return viz_array
+
+
+def visualize_border(image: np.ndarray, contour: Optional[np.ndarray]) -> np.ndarray:
+    """
+    Visualize border irregularity using convex hull comparison.
+
+    This function provides visual evidence for border irregularity by:
+    1. Drawing the actual detected contour in green
+    2. Drawing the convex hull (ideal smooth border) in red
+    3. Gaps between green and red show border irregularity
+
+    Args:
+        image (np.ndarray): Original RGB image
+        contour (Optional[np.ndarray]): Contour of the segmented lesion
+
+    Returns:
+        np.ndarray: RGB visualization showing border analysis
+
+    DIP Concepts:
+        - Convex Hull: The smallest convex polygon that contains all contour points
+        - Border Irregularity: Measured by gaps between actual contour and convex hull
+        - Color Coding: Green = actual border, Red = ideal smooth border
+    """
+    if contour is None:
+        return image.copy()
+
+    # Create visualization image
+    viz_image = image.copy()
+
+    # Draw the actual contour in green
+    cv2.drawContours(viz_image, [contour], -1, (0, 255, 0), 3)
+
+    # Calculate and draw convex hull in red
+    hull = cv2.convexHull(contour)
+    cv2.drawContours(viz_image, [hull], -1, (255, 0, 0), 2)
+
+    # Add legend text
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(viz_image, 'Green: Actual Border', (10, 30), font, 0.7, (0, 255, 0), 2)
+    cv2.putText(viz_image, 'Red: Convex Hull (Ideal)', (10, 60), font, 0.7, (255, 0, 0), 2)
+    cv2.putText(viz_image, 'Gaps = Irregularity', (10, 90), font, 0.7, (255, 255, 255), 2)
+
+    return viz_image
+
+
+def visualize_color_clusters(image: np.ndarray, mask: np.ndarray, num_colors: int) -> np.ndarray:
+    """
+    Visualize color variation using K-Means clustering.
+
+    This function provides visual evidence for color variation by:
+    1. Performing K-Means clustering on lesion pixels
+    2. Creating a color map showing dominant color regions
+    3. Each pixel is replaced by its cluster center color
+
+    Args:
+        image (np.ndarray): Original RGB image
+        mask (np.ndarray): Binary mask of the segmented lesion
+        num_colors (int): Number of color clusters detected
+
+    Returns:
+        np.ndarray: RGB visualization showing color cluster map
+
+    DIP Concepts:
+        - K-Means Clustering: Unsupervised learning for color quantization
+        - Color Quantization: Reducing colors to show dominant color regions
+        - Visual Proof: Shows exactly which colors are present and where
+    """
+    if np.sum(mask) == 0 or num_colors < 1:
+        return image.copy()
+
+    # Extract lesion pixels
+    lesion_pixels = image[mask > 0]
+
+    if len(lesion_pixels) < num_colors:
+        num_colors = max(1, len(lesion_pixels) // 10)
+
+    # Perform K-Means clustering
+    kmeans = KMeans(n_clusters=num_colors, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(lesion_pixels)
+    cluster_centers = kmeans.cluster_centers_.astype(np.uint8)
+
+    # Create color-mapped image
+    color_map = np.zeros_like(image)
+    color_map[mask > 0] = cluster_centers[labels]
+
+    # Create side-by-side visualization
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Original lesion
+    original_lesion = image.copy()
+    original_lesion[mask == 0] = [255, 255, 255]  # White background
+    axes[0].imshow(original_lesion)
+    axes[0].set_title('Original Lesion', fontweight='bold')
+    axes[0].axis('off')
+
+    # Color cluster map
+    color_map_display = color_map.copy()
+    color_map_display[mask == 0] = [255, 255, 255]  # White background
+    axes[1].imshow(color_map_display)
+    axes[1].set_title(f'Color Clusters (K={num_colors})', fontweight='bold')
+    axes[1].axis('off')
+
+    # Color palette
+    palette_height = 50
+    palette_width = image.shape[1]
+    palette = np.zeros((palette_height, palette_width, 3), dtype=np.uint8)
+    color_width = palette_width // num_colors
+    for i, color in enumerate(cluster_centers):
+        start_x = i * color_width
+        end_x = (i + 1) * color_width if i < num_colors - 1 else palette_width
+        palette[:, start_x:end_x] = color
+
+    axes[2].imshow(palette)
+    axes[2].set_title(f'Detected Color Palette ({num_colors} colors)', fontweight='bold')
+    axes[2].axis('off')
+
+    plt.tight_layout()
+
+    # Convert plot to numpy array - FIXED for different matplotlib backends
+    fig.canvas.draw()
+    
+    # Handle different matplotlib backends
+    if hasattr(fig.canvas, 'tostring_rgb'):
+        viz_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    else:
+        # Alternative method for different backends
+        viz_array = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+        viz_array = viz_array[:, :, :3]  # Remove alpha channel
+    
+    plt.close(fig)
+
+    return viz_array
+
+
+def visualize_texture(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """
+    Visualize texture using Local Binary Pattern (LBP).
+
+    This function provides visual evidence for texture features by:
+    1. Computing Local Binary Pattern of the lesion
+    2. Displaying LBP image to show micro-texture patterns
+    3. Uniform LBP = smooth texture, Chaotic LBP = irregular texture
+
+    Args:
+        image (np.ndarray): Original RGB image
+        mask (np.ndarray): Binary mask of the segmented lesion
+
+    Returns:
+        np.ndarray: RGB visualization showing LBP texture analysis
+
+    DIP Concepts:
+        - Local Binary Pattern: Texture descriptor based on local pixel relationships
+        - Texture Homogeneity: Uniform patterns indicate smooth texture
+        - Texture Irregularity: Chaotic patterns indicate disorganized structure
+    """
+    if np.sum(mask) == 0:
+        return image.copy()
+
+    # Convert to grayscale
+    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+    # Extract lesion region for LBP
+    y_coords, x_coords = np.where(mask > 0)
+    if len(y_coords) == 0:
+        return image.copy()
+
+    min_y, max_y = np.min(y_coords), np.max(y_coords)
+    min_x, max_x = np.min(x_coords), np.max(x_coords)
+    lesion_patch = gray_image[min_y:max_y+1, min_x:max_x+1]
+    lesion_mask_patch = mask[min_y:max_y+1, min_x:max_x+1]
+
+    # Calculate LBP
+    radius = 1
+    n_points = 8 * radius
+    lbp = local_binary_pattern(lesion_patch, n_points, radius, method='uniform')
+
+    # Normalize LBP for visualization
+    lbp_normalized = ((lbp - lbp.min()) / (lbp.max() - lbp.min() + 1e-7) * 255).astype(np.uint8)
+
+    # Mask out non-lesion areas
+    lbp_normalized[lesion_mask_patch == 0] = 0
+
+    # Create visualization
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Original lesion patch
+    axes[0].imshow(lesion_patch, cmap='gray')
+    axes[0].set_title('Lesion (Grayscale)', fontweight='bold')
+    axes[0].axis('off')
+
+    # LBP texture map
+    axes[1].imshow(lbp_normalized, cmap='jet')
+    axes[1].set_title('LBP Texture Map', fontweight='bold')
+    axes[1].axis('off')
+
+    # LBP histogram
+    lbp_hist, _ = np.histogram(lbp[lesion_mask_patch > 0].ravel(), bins=n_points + 2, range=(0, n_points + 2))
+    axes[2].bar(range(len(lbp_hist)), lbp_hist, color='steelblue')
+    axes[2].set_title('LBP Pattern Distribution', fontweight='bold')
+    axes[2].set_xlabel('LBP Pattern')
+    axes[2].set_ylabel('Frequency')
+
+    plt.tight_layout()
+
+    # Convert plot to numpy array - FIXED for different matplotlib backends
+    fig.canvas.draw()
+    
+    # Handle different matplotlib backends
+    if hasattr(fig.canvas, 'tostring_rgb'):
+        viz_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    else:
+        # Alternative method for different backends
+        viz_array = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+        viz_array = viz_array[:, :, :3]  # Remove alpha channel
+    
+    plt.close(fig)
+
+    return viz_array

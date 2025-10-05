@@ -237,23 +237,23 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     
     # If the combination is too restrictive, use HSV mask alone but with validation
     if np.sum(temp_mask > 0) < np.sum(hsv_mask > 0) * 0.3:  # If less than 30% of HSV
-        print(f"🔍 Debug - Using HSV mask alone due to restrictive combination")
+        # print(f"🔍 Debug - Using HSV mask alone due to restrictive combination")
         temp_mask = hsv_mask
     
     selected_pixels = np.sum(temp_mask > 0)
     total_pixels = temp_mask.size
     
-    print(f"🔍 Debug - Conservative HSV mask: {np.sum(hsv_mask > 0)} pixels ({np.sum(hsv_mask > 0)/total_pixels*100:.2f}%)")
-    print(f"🔍 Debug - Conservative a-channel mask: {np.sum(a_mask > 0)} pixels ({np.sum(a_mask > 0)/total_pixels*100:.2f}%)")
-    print(f"🔍 Debug - Conservative intensity mask: {np.sum(intensity_mask > 0)} pixels ({np.sum(intensity_mask > 0)/total_pixels*100:.2f}%)")
-    print(f"🔍 Debug - Combined conservative mask: {selected_pixels} pixels ({selected_pixels/total_pixels*100:.2f}%)")
+    # print(f"🔍 Debug - Conservative HSV mask: {np.sum(hsv_mask > 0)} pixels ({np.sum(hsv_mask > 0)/total_pixels*100:.2f}%)")
+    # print(f"🔍 Debug - Conservative a-channel mask: {np.sum(a_mask > 0)} pixels ({np.sum(a_mask > 0)/total_pixels*100:.2f}%)")
+    # print(f"🔍 Debug - Conservative intensity mask: {np.sum(intensity_mask > 0)} pixels ({np.sum(intensity_mask > 0)/total_pixels*100:.2f}%)")
+    # print(f"🔍 Debug - Combined conservative mask: {selected_pixels} pixels ({selected_pixels/total_pixels*100:.2f}%)")
     
     # MINIMAL POST-PROCESSING FOR PRECISE SEGMENTATION
     # No aggressive refinements that could cause over-segmentation
     
     # Debug: Check thresholding results
     temp_white_pixels = np.sum(temp_mask > 0)
-    print(f"🔍 Debug - Final selected {temp_white_pixels} pixels ({temp_white_pixels/temp_mask.size*100:.2f}% of image)")
+    # print(f"🔍 Debug - Final selected {temp_white_pixels} pixels ({temp_white_pixels/temp_mask.size*100:.2f}% of image)")
     
     final_mask = temp_mask
     
@@ -264,12 +264,12 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     kernel_tiny = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))  # Tiny kernel only
     closed_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_tiny)
     
-    print(f"🔍 Debug - After tiny closing: {np.sum(closed_mask > 0)} pixels ({np.sum(closed_mask > 0)/closed_mask.size*100:.2f}%)")
+    # print(f"🔍 Debug - After tiny closing: {np.sum(closed_mask > 0)} pixels ({np.sum(closed_mask > 0)/closed_mask.size*100:.2f}%)")
     
     # No opening or other operations to avoid any shape changes
     opened_mask = closed_mask
     
-    print(f"🔍 Debug - Ultra-conservative operations completed: {np.sum(opened_mask > 0)} pixels ({np.sum(opened_mask > 0)/opened_mask.size*100:.2f}%)")
+    # print(f"🔍 Debug - Ultra-conservative operations completed: {np.sum(opened_mask > 0)} pixels ({np.sum(opened_mask > 0)/opened_mask.size*100:.2f}%)")
     
     # Find contours and select the largest valid one
     contours, _ = cv2.findContours(opened_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -293,7 +293,7 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
                 # Only accept contours with reasonable shape (not too elongated or fragmented)
                 if aspect_ratio < 10 and solidity > 0.3:  # Reasonable shape constraints
                     valid_contours.append(contour)
-                    print(f"🔍 Debug - Valid contour: area={area:.0f}, aspect_ratio={aspect_ratio:.2f}, solidity={solidity:.3f}")
+                    # print(f"🔍 Debug - Valid contour: area={area:.0f}, aspect_ratio={aspect_ratio:.2f}, solidity={solidity:.3f}")
         
         if valid_contours:
             # PHASE 2D: ADVANCED CONTOUR SELECTION

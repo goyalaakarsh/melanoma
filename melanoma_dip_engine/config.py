@@ -14,7 +14,7 @@ SUPPORTED_FORMATS: List[str] = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
 # Based on clinical guidelines and research literature
 # ⚠️  Note: These values are mathematically consistent assuming 10 pixels/mm
 # MIN_LESION_AREA corresponds to ~3.14 mm² (2mm diameter circle)
-MIN_LESION_AREA: int = 314  # Minimum area for 2mm diameter lesion (π * 10²)
+MIN_LESION_AREA: int = 100  # Lower threshold for PH2 dataset compatibility
 MAX_LESION_AREA: int = 200000  # Maximum to avoid processing errors
 MIN_DIAMETER_MM: float = 2.0  # Minimum 2mm diameter for clinical relevance
 MAX_DIAMETER_MM: float = 100.0  # Maximum 100mm (10cm) diameter

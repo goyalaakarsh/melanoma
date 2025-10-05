@@ -7,15 +7,10 @@ with advanced equity-focused algorithms for diverse skin tones.
 import cv2
 import numpy as np
 from typing import Tuple, Optional, Dict
-# Removed unused imports: exposure, segmentation, morphology, peak_local_maxima, ndimage
-# These were from the complex segmentation algorithms that were simplified
 import warnings
 import config
 
-# ⚠️  MEDICAL SAFETY: Only suppress specific, non-critical warnings
-# Suppressing ALL UserWarnings could hide critical medical imaging issues
 warnings.filterwarnings('ignore', category=DeprecationWarning)
-
 
 def load_and_preprocess(image_path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -196,18 +191,40 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     # Simplified, medically validated segmentation using CIELab a-channel only
     # This is the most reliable method for pigmented lesion detection across skin tones
     
-    # Apply Otsu's thresholding to CIELab a-channel (green-red axis)
-    # This channel provides the best contrast for pigmented lesions
-    _, final_mask = cv2.threshold(a_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Go back to Otsu's thresholding but with careful inversion logic
+    # Otsu's method is more adaptive to the actual image content
+    _, temp_mask = cv2.threshold(a_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
-    # Advanced morphological refinement
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, config.SEGMENTATION_KERNEL_SIZE)
+    # Check if we need to invert based on the characteristics of the selected region
+    selected_positive = np.sum((temp_mask > 0) & (a_channel > 0))
+    selected_negative = np.sum((temp_mask > 0) & (a_channel < 0))
+    selected_total = np.sum(temp_mask > 0)
     
-    # Opening: Remove small noise artifacts
-    opened_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel)
+    print(f"🔍 Debug - Otsu selected {selected_total} pixels")
+    print(f"🔍 Debug - Of selected: {selected_positive} positive a-values, {selected_negative} negative a-values")
     
-    # Closing: Fill small holes within the lesion
-    closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
+    # For pigmented lesions, we expect more positive a-values in the lesion region
+    # If Otsu selected mostly negative a-values, invert the mask
+    if selected_total > 0 and selected_negative > selected_positive:
+        temp_mask = 255 - temp_mask
+        print("🔄 Inverted mask - Otsu selected negative a-values, inverting for pigmented lesions")
+    else:
+        print("✅ Using Otsu mask - correctly selected positive a-values")
+    
+    # Debug: Check thresholding results
+    temp_white_pixels = np.sum(temp_mask > 0)
+    print(f"🔍 Debug - Final selected {temp_white_pixels} pixels ({temp_white_pixels/a_channel.size*100:.2f}% of image)")
+    
+    final_mask = temp_mask
+    
+    # Conservative morphological refinement with smaller kernels
+    kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))  # Much smaller kernel
+    
+    # Light opening: Remove only very small noise artifacts
+    opened_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel_small)
+    
+    # Light closing: Fill only very small holes within the lesion
+    closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel_small)
     
     # Find contours and select the largest valid one
     contours, _ = cv2.findContours(closed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -221,8 +238,17 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
         valid_contours = []
         for contour in contours:
             area = cv2.contourArea(contour)
+            # Stricter filtering: require reasonable area and aspect ratio
             if config.MIN_LESION_AREA <= area <= config.MAX_LESION_AREA:
-                valid_contours.append(contour)
+                # Additional shape validation to prevent over-segmentation
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else float('inf')
+                solidity = area / cv2.contourArea(cv2.convexHull(contour)) if cv2.contourArea(cv2.convexHull(contour)) > 0 else 0
+                
+                # Only accept contours with reasonable shape (not too elongated or fragmented)
+                if aspect_ratio < 10 and solidity > 0.3:  # Reasonable shape constraints
+                    valid_contours.append(contour)
+                    print(f"🔍 Debug - Valid contour: area={area:.0f}, aspect_ratio={aspect_ratio:.2f}, solidity={solidity:.3f}")
         
         if valid_contours:
             # Select the largest contour (most conservative approach)

@@ -8,7 +8,7 @@ All features are optimized for equity across diverse skin tones and clinical int
 import cv2
 import numpy as np
 from typing import Dict, Optional, Tuple, List
-from scipy import signal
+from scipy import signal, stats
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 # Removed unused imports: ndimage, measure, morphology
 # These were from advanced algorithms that were simplified
@@ -279,7 +279,7 @@ def calculate_diameter(contour: Optional[np.ndarray], image_shape: Tuple[int, in
     max_feret_diameter_mm = max_feret_diameter_pixels / PIXELS_PER_MM
     equivalent_diameter_mm = equivalent_diameter_pixels / PIXELS_PER_MM
     bounding_box_diagonal_mm = bounding_box_diagonal_pixels / PIXELS_PER_MM
-    convex_hull_diameter_mm = convex_hull_diameter_mm / PIXELS_PER_MM
+    convex_hull_diameter_mm = convex_hull_diameter_pixels / PIXELS_PER_MM
     
     # ⚠️  WARNING: Size assessment based on UNVALIDATED pixel-to-mm conversion
     # These measurements are for research purposes only and should not be used for medical decisions
@@ -402,7 +402,7 @@ def calculate_advanced_texture_features(image: np.ndarray, mask: np.ndarray) -> 
     statistical_features = {
         'statistical_mean': float(np.mean(lesion_region)),
         'statistical_std': float(np.std(lesion_region)),
-        'statistical_skewness': float(signal.skew(lesion_region)) if len(lesion_region) > 1 else 0.0
+        'statistical_skewness': float(stats.skew(lesion_region)) if len(lesion_region) > 1 else 0.0
     }
     
     # 4. Gradient-based Features

@@ -56,6 +56,12 @@ def test_ph2_pipeline():
         binary_mask, main_contour, seg_metrics = ip.segment_lesion(hair_free_image)
         print(f"✅ Segmentation completed: {seg_metrics['confidence_score']:.3f} confidence")
         
+        # Debug segmentation output
+        print(f"🔍 Debug - Binary mask shape: {binary_mask.shape}")
+        print(f"🔍 Debug - Binary mask unique values: {np.unique(binary_mask)}")
+        print(f"🔍 Debug - Binary mask sum: {np.sum(binary_mask)}")
+        print(f"🔍 Debug - Binary mask percentage white: {(np.sum(binary_mask > 0) / binary_mask.size) * 100:.2f}%")
+        
         # Step 4: Feature extraction
         print("\n📊 Step 4: Feature extraction...")
         if main_contour is not None:

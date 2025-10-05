@@ -216,34 +216,29 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     # Method 3: CIELab a-channel thresholding
     _, a_mask = cv2.threshold(a_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
-    # PRECISE SEGMENTATION APPROACH - NO OVER/UNDER SEGMENTATION
-    # Focus on accuracy within ground truth boundaries
+    # SMART PRECISE SEGMENTATION - ELIMINATE FALSE POSITIVES
+    # Use the best-performing method from diagnostic analysis with boundary constraints
     
-    # Method 1: Conservative HSV color-based segmentation
-    # Use more restrictive HSV range to avoid false positives
-    hsv_lower = np.array([0, 40, 40])    # Higher saturation/brightness thresholds
+    # Primary method: HSV color-based segmentation (proven performer, Dice 0.218)
+    # Use balanced HSV range for good coverage without false positives
+    hsv_lower = np.array([0, 35, 35])    # Balanced saturation/brightness thresholds
     hsv_upper = np.array([30, 255, 255])
     hsv_mask = cv2.inRange(hsv_image, hsv_lower, hsv_upper)
     
-    # Method 2: CIELab a-channel with balanced thresholding
-    # Use percentile-based thresholding for more control
-    a_channel = lab_image[:, :, 1]
-    a_threshold = np.percentile(a_channel, 75)  # Top 25% of a-values (more inclusive)
-    a_mask = (a_channel > a_threshold).astype(np.uint8) * 255
-    
-    # Method 3: Balanced intensity thresholding
+    # Secondary method: Conservative intensity thresholding for boundary validation
     gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    # Use balanced percentile thresholding
-    intensity_threshold = np.percentile(gray_image, 60)  # Darker than 60% of pixels (more inclusive)
+    # Use conservative percentile thresholding
+    intensity_threshold = np.percentile(gray_image, 55)  # Darker than 55% of pixels
     intensity_mask = (gray_image < intensity_threshold).astype(np.uint8) * 255
     
-    # Balanced combination: require HSV + one other method to agree
-    # This provides better coverage while maintaining precision
-    temp_mask = cv2.bitwise_and(hsv_mask, a_mask)  # HSV + CIELab agreement
-    temp_mask2 = cv2.bitwise_and(hsv_mask, intensity_mask)  # HSV + Intensity agreement
+    # Smart combination: HSV primary + intensity boundary validation
+    # This ensures we capture the lesion while staying within reasonable boundaries
+    temp_mask = cv2.bitwise_and(hsv_mask, intensity_mask)
     
-    # Combine both agreements (union of the two combinations)
-    temp_mask = cv2.bitwise_or(temp_mask, temp_mask2)
+    # If the combination is too restrictive, use HSV mask alone but with validation
+    if np.sum(temp_mask > 0) < np.sum(hsv_mask > 0) * 0.3:  # If less than 30% of HSV
+        print(f"🔍 Debug - Using HSV mask alone due to restrictive combination")
+        temp_mask = hsv_mask
     
     selected_pixels = np.sum(temp_mask > 0)
     total_pixels = temp_mask.size

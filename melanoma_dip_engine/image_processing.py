@@ -191,40 +191,55 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     # Simplified, medically validated segmentation using CIELab a-channel only
     # This is the most reliable method for pigmented lesion detection across skin tones
     
-    # Go back to Otsu's thresholding but with careful inversion logic
-    # Otsu's method is more adaptive to the actual image content
-    _, temp_mask = cv2.threshold(a_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Multi-channel voting approach for better segmentation
+    # This combines multiple color channels for more robust detection
     
-    # Check if we need to invert based on the characteristics of the selected region
-    selected_positive = np.sum((temp_mask > 0) & (a_channel > 0))
-    selected_negative = np.sum((temp_mask > 0) & (a_channel < 0))
-    selected_total = np.sum(temp_mask > 0)
+    # Convert to different color spaces
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     
-    print(f"🔍 Debug - Otsu selected {selected_total} pixels")
-    print(f"🔍 Debug - Of selected: {selected_positive} positive a-values, {selected_negative} negative a-values")
+    # Extract channels
+    a_channel = lab_image[:, :, 1]  # CIELab a-channel
+    s_channel = hsv_image[:, :, 1]  # HSV saturation
+    v_channel = hsv_image[:, :, 2]  # HSV value
     
-    # For pigmented lesions, we expect more positive a-values in the lesion region
-    # If Otsu selected mostly negative a-values, invert the mask
-    if selected_total > 0 and selected_negative > selected_positive:
-        temp_mask = 255 - temp_mask
-        print("🔄 Inverted mask - Otsu selected negative a-values, inverting for pigmented lesions")
-    else:
-        print("✅ Using Otsu mask - correctly selected positive a-values")
+    # Apply Otsu's thresholding to each channel
+    _, a_mask = cv2.threshold(a_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, s_mask = cv2.threshold(s_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, v_mask = cv2.threshold(v_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Multi-channel voting - at least 2 channels must agree (balanced)
+    vote_threshold = 2
+    temp_mask = np.zeros_like(a_mask)
+    
+    for i in range(a_mask.shape[0]):
+        for j in range(a_mask.shape[1]):
+            votes = sum([
+                a_mask[i, j] > 128,
+                s_mask[i, j] > 128, 
+                v_mask[i, j] > 128
+            ])
+            if votes >= vote_threshold:
+                temp_mask[i, j] = 255
+    
+    print(f"🔍 Debug - Multi-channel voting selected {np.sum(temp_mask > 0)} pixels")
+    print(f"🔍 Debug - This is {np.sum(temp_mask > 0)/temp_mask.size*100:.2f}% of image")
     
     # Debug: Check thresholding results
     temp_white_pixels = np.sum(temp_mask > 0)
-    print(f"🔍 Debug - Final selected {temp_white_pixels} pixels ({temp_white_pixels/a_channel.size*100:.2f}% of image)")
+    print(f"🔍 Debug - Final selected {temp_white_pixels} pixels ({temp_white_pixels/temp_mask.size*100:.2f}% of image)")
     
     final_mask = temp_mask
     
-    # Conservative morphological refinement with smaller kernels
-    kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))  # Much smaller kernel
+    # Balanced morphological refinement for better lesion filling
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  # Larger kernel for closing
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))   # Smaller kernel for opening
     
-    # Light opening: Remove only very small noise artifacts
-    opened_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel_small)
+    # Opening: Remove small noise artifacts
+    opened_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel_open)
     
-    # Light closing: Fill only very small holes within the lesion
-    closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel_small)
+    # Closing: Fill holes within the lesion (more aggressive)
+    closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel_close)
     
     # Find contours and select the largest valid one
     contours, _ = cv2.findContours(closed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

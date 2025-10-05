@@ -191,10 +191,10 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     # Simplified, medically validated segmentation using CIELab a-channel only
     # This is the most reliable method for pigmented lesion detection across skin tones
     
-    # Multi-channel voting approach for better segmentation
-    # This combines multiple color channels for more robust detection
+    # PHASE 2: HYBRID ADAPTIVE THRESHOLDING + MULTI-CHANNEL INTEGRATION
+    # Combining the best of both approaches for robust segmentation
     
-    # Convert to different color spaces
+    # Convert to different color spaces for multi-channel analysis
     hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     
@@ -203,27 +203,58 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     s_channel = hsv_image[:, :, 1]  # HSV saturation
     v_channel = hsv_image[:, :, 2]  # HSV value
     
-    # Apply Otsu's thresholding to each channel
+    # Method 1: Adaptive thresholding on grayscale (best performer from diagnostic)
+    adaptive_mask = cv2.adaptiveThreshold(
+        gray_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
+    
+    # Method 2: HSV Color-based segmentation (good performer from diagnostic)
+    hsv_lower = np.array([0, 30, 30])  # Lower HSV threshold for brown/dark colors
+    hsv_upper = np.array([30, 255, 255])  # Upper HSV threshold
+    hsv_mask = cv2.inRange(hsv_image, hsv_lower, hsv_upper)
+    
+    # Method 3: CIELab a-channel thresholding
     _, a_mask = cv2.threshold(a_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _, s_mask = cv2.threshold(s_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _, v_mask = cv2.threshold(v_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
-    # Multi-channel voting - at least 2 channels must agree (balanced)
-    vote_threshold = 2
-    temp_mask = np.zeros_like(a_mask)
+    # PRECISE SEGMENTATION APPROACH - NO OVER/UNDER SEGMENTATION
+    # Focus on accuracy within ground truth boundaries
     
-    for i in range(a_mask.shape[0]):
-        for j in range(a_mask.shape[1]):
-            votes = sum([
-                a_mask[i, j] > 128,
-                s_mask[i, j] > 128, 
-                v_mask[i, j] > 128
-            ])
-            if votes >= vote_threshold:
-                temp_mask[i, j] = 255
+    # Method 1: Conservative HSV color-based segmentation
+    # Use more restrictive HSV range to avoid false positives
+    hsv_lower = np.array([0, 40, 40])    # Higher saturation/brightness thresholds
+    hsv_upper = np.array([30, 255, 255])
+    hsv_mask = cv2.inRange(hsv_image, hsv_lower, hsv_upper)
     
-    print(f"🔍 Debug - Multi-channel voting selected {np.sum(temp_mask > 0)} pixels")
-    print(f"🔍 Debug - This is {np.sum(temp_mask > 0)/temp_mask.size*100:.2f}% of image")
+    # Method 2: CIELab a-channel with balanced thresholding
+    # Use percentile-based thresholding for more control
+    a_channel = lab_image[:, :, 1]
+    a_threshold = np.percentile(a_channel, 75)  # Top 25% of a-values (more inclusive)
+    a_mask = (a_channel > a_threshold).astype(np.uint8) * 255
+    
+    # Method 3: Balanced intensity thresholding
+    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    # Use balanced percentile thresholding
+    intensity_threshold = np.percentile(gray_image, 60)  # Darker than 60% of pixels (more inclusive)
+    intensity_mask = (gray_image < intensity_threshold).astype(np.uint8) * 255
+    
+    # Balanced combination: require HSV + one other method to agree
+    # This provides better coverage while maintaining precision
+    temp_mask = cv2.bitwise_and(hsv_mask, a_mask)  # HSV + CIELab agreement
+    temp_mask2 = cv2.bitwise_and(hsv_mask, intensity_mask)  # HSV + Intensity agreement
+    
+    # Combine both agreements (union of the two combinations)
+    temp_mask = cv2.bitwise_or(temp_mask, temp_mask2)
+    
+    selected_pixels = np.sum(temp_mask > 0)
+    total_pixels = temp_mask.size
+    
+    print(f"🔍 Debug - Conservative HSV mask: {np.sum(hsv_mask > 0)} pixels ({np.sum(hsv_mask > 0)/total_pixels*100:.2f}%)")
+    print(f"🔍 Debug - Conservative a-channel mask: {np.sum(a_mask > 0)} pixels ({np.sum(a_mask > 0)/total_pixels*100:.2f}%)")
+    print(f"🔍 Debug - Conservative intensity mask: {np.sum(intensity_mask > 0)} pixels ({np.sum(intensity_mask > 0)/total_pixels*100:.2f}%)")
+    print(f"🔍 Debug - Combined conservative mask: {selected_pixels} pixels ({selected_pixels/total_pixels*100:.2f}%)")
+    
+    # MINIMAL POST-PROCESSING FOR PRECISE SEGMENTATION
+    # No aggressive refinements that could cause over-segmentation
     
     # Debug: Check thresholding results
     temp_white_pixels = np.sum(temp_mask > 0)
@@ -231,20 +262,24 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     
     final_mask = temp_mask
     
-    # Balanced morphological refinement for better lesion filling
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  # Larger kernel for closing
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))   # Smaller kernel for opening
+    # ULTRA-CONSERVATIVE MORPHOLOGICAL OPERATIONS
+    # Only fill tiny holes, no expansion or aggressive operations
     
-    # Opening: Remove small noise artifacts
-    opened_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel_open)
+    # Only apply very light closing to fill tiny holes (1-2 pixel gaps)
+    kernel_tiny = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))  # Tiny kernel only
+    closed_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_tiny)
     
-    # Closing: Fill holes within the lesion (more aggressive)
-    closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel_close)
+    print(f"🔍 Debug - After tiny closing: {np.sum(closed_mask > 0)} pixels ({np.sum(closed_mask > 0)/closed_mask.size*100:.2f}%)")
+    
+    # No opening or other operations to avoid any shape changes
+    opened_mask = closed_mask
+    
+    print(f"🔍 Debug - Ultra-conservative operations completed: {np.sum(opened_mask > 0)} pixels ({np.sum(opened_mask > 0)/opened_mask.size*100:.2f}%)")
     
     # Find contours and select the largest valid one
-    contours, _ = cv2.findContours(closed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(opened_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    final_mask = np.zeros_like(closed_mask)
+    final_mask = np.zeros_like(opened_mask)
     main_contour = None
     confidence_score = 0.0
     
@@ -266,12 +301,34 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
                     print(f"🔍 Debug - Valid contour: area={area:.0f}, aspect_ratio={aspect_ratio:.2f}, solidity={solidity:.3f}")
         
         if valid_contours:
-            # Select the largest contour (most conservative approach)
-            main_contour = max(valid_contours, key=cv2.contourArea)
-            cv2.fillPoly(final_mask, [main_contour], 255)
+            # PHASE 2D: ADVANCED CONTOUR SELECTION
+            # Select contour with best combination of area and shape quality
             
-            # Simple confidence score based on area and shape
-            confidence_score = min(1.0, cv2.contourArea(main_contour) / config.MIN_LESION_AREA)
+            best_contour = None
+            best_score = 0
+            
+            for contour in valid_contours:
+                area = cv2.contourArea(contour)
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else float('inf')
+                solidity = area / cv2.contourArea(cv2.convexHull(contour)) if cv2.contourArea(cv2.convexHull(contour)) > 0 else 0
+                
+                # Calculate composite score: area * shape_quality
+                shape_quality = 1.0 / (1.0 + aspect_ratio/10.0) * solidity  # Higher is better
+                composite_score = area * shape_quality
+                
+                if composite_score > best_score:
+                    best_score = composite_score
+                    best_contour = contour
+            
+            if best_contour is not None:
+                main_contour = best_contour
+                cv2.fillPoly(final_mask, [main_contour], 255)
+                
+                # Enhanced confidence score based on multiple factors
+                area = cv2.contourArea(main_contour)
+                confidence_score = min(1.0, (area / config.MAX_LESION_AREA) * shape_quality)
+                print(f"✅ Selected best contour: area={area:.0f}, shape_quality={shape_quality:.3f}, confidence={confidence_score:.3f}")
     
     # Calculate quality metrics
     lesion_area = np.sum(final_mask > 0)

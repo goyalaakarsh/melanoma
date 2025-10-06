@@ -158,10 +158,6 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     """
     Segment the lesion from surrounding skin using simplified, medically validated approach.
     
-    ⚠️  RESEARCH DISCLAIMER: This segmentation is for research purposes only.
-    Medical lesion assessment requires clinical expertise and should not be used
-    for diagnostic purposes without proper medical validation.
-    
     This function implements a simplified, medically safe segmentation pipeline:
     1. CIELab a-channel thresholding (proven method for pigmented lesions)
     2. Morphological refinement (opening and closing)
@@ -219,7 +215,7 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     # SMART PRECISE SEGMENTATION - ELIMINATE FALSE POSITIVES
     # Use the best-performing method from diagnostic analysis with boundary constraints
     
-    # Primary method: HSV color-based segmentation (proven performer, Dice 0.218)
+    # Primary method: HSV color-based segmentation 
     # Use balanced HSV range for good coverage without false positives
     hsv_lower = np.array([0, 35, 35])    # Balanced saturation/brightness thresholds
     hsv_upper = np.array([30, 255, 255])

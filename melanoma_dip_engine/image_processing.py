@@ -82,7 +82,6 @@ def load_and_preprocess(image_path: str) -> Tuple[np.ndarray, np.ndarray, np.nda
     hsv_image = cv2.cvtColor(rgb_resized, cv2.COLOR_RGB2HSV)
     
     # Convert to CIELab color space (preserving absolute lightness values)
-    # ⚠️  Note: Lightness normalization removed as it could mask dark lesions
     # Absolute lightness values are important for melanoma detection
     lab_image = cv2.cvtColor(rgb_resized, cv2.COLOR_RGB2LAB)
     
@@ -176,96 +175,40 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     if image is None or image.size == 0:
         raise ValueError("Input image is invalid")
     
-    # Convert to multiple color spaces for comprehensive analysis
+    # Convert to color spaces needed for segmentation
     lab_image = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     
-    # Extract only the CIELab a channel for simplified segmentation
-    a_channel = lab_image[:, :, 1]  # CIELab a channel (green-red) - best for pigmented lesions
-    
-    # Simplified, medically validated segmentation using CIELab a-channel only
-    # This is the most reliable method for pigmented lesion detection across skin tones
-    
-    # PHASE 2: HYBRID ADAPTIVE THRESHOLDING + MULTI-CHANNEL INTEGRATION
-    # Combining the best of both approaches for robust segmentation
-    
-    # Convert to different color spaces for multi-channel analysis
-    hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    
-    # Extract channels
-    a_channel = lab_image[:, :, 1]  # CIELab a-channel
-    s_channel = hsv_image[:, :, 1]  # HSV saturation
-    v_channel = hsv_image[:, :, 2]  # HSV value
-    
-    # Method 1: Adaptive thresholding on grayscale (best performer from diagnostic)
+    # Method 1: Adaptive thresholding 
     adaptive_mask = cv2.adaptiveThreshold(
         gray_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
     )
     
-    # Method 2: HSV Color-based segmentation (good performer from diagnostic)
-    hsv_lower = np.array([0, 30, 30])  # Lower HSV threshold for brown/dark colors
-    hsv_upper = np.array([30, 255, 255])  # Upper HSV threshold
-    hsv_mask = cv2.inRange(hsv_image, hsv_lower, hsv_upper)
-    
-    # Method 3: CIELab a-channel thresholding
-    _, a_mask = cv2.threshold(a_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    # SMART PRECISE SEGMENTATION - ELIMINATE FALSE POSITIVES
-    # Use the best-performing method from diagnostic analysis with boundary constraints
-    
-    # Primary method: HSV color-based segmentation 
-    # Use balanced HSV range for good coverage without false positives
-    hsv_lower = np.array([0, 35, 35])    # Balanced saturation/brightness thresholds
+    # Method 2: HSV Color-based segmentation 
+    hsv_lower = np.array([0, 35, 35])   
     hsv_upper = np.array([30, 255, 255])
     hsv_mask = cv2.inRange(hsv_image, hsv_lower, hsv_upper)
     
-    # Secondary method: Conservative intensity thresholding for boundary validation
-    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    # Use conservative percentile thresholding
+    # Conservative intensity thresholding for boundary validation
     intensity_threshold = np.percentile(gray_image, 55)  # Darker than 55% of pixels
     intensity_mask = (gray_image < intensity_threshold).astype(np.uint8) * 255
     
-    # Smart combination: HSV primary + intensity boundary validation
-    # This ensures we capture the lesion while staying within reasonable boundaries
-    temp_mask = cv2.bitwise_and(hsv_mask, intensity_mask)
+    # Smart combination: Adaptive (primary) + HSV (secondary) + intensity validation
+    temp_mask = cv2.bitwise_and(adaptive_mask, hsv_mask)
     
-    # If the combination is too restrictive, use HSV mask alone but with validation
-    if np.sum(temp_mask > 0) < np.sum(hsv_mask > 0) * 0.3:  # If less than 30% of HSV
-        # print(f"🔍 Debug - Using HSV mask alone due to restrictive combination")
-        temp_mask = hsv_mask
+    # Apply intensity boundary validation
+    temp_mask = cv2.bitwise_and(temp_mask, intensity_mask)
     
-    selected_pixels = np.sum(temp_mask > 0)
-    total_pixels = temp_mask.size
-    
-    # print(f"🔍 Debug - Conservative HSV mask: {np.sum(hsv_mask > 0)} pixels ({np.sum(hsv_mask > 0)/total_pixels*100:.2f}%)")
-    # print(f"🔍 Debug - Conservative a-channel mask: {np.sum(a_mask > 0)} pixels ({np.sum(a_mask > 0)/total_pixels*100:.2f}%)")
-    # print(f"🔍 Debug - Conservative intensity mask: {np.sum(intensity_mask > 0)} pixels ({np.sum(intensity_mask > 0)/total_pixels*100:.2f}%)")
-    # print(f"🔍 Debug - Combined conservative mask: {selected_pixels} pixels ({selected_pixels/total_pixels*100:.2f}%)")
-    
-    # MINIMAL POST-PROCESSING FOR PRECISE SEGMENTATION
-    # No aggressive refinements that could cause over-segmentation
-    
-    # Debug: Check thresholding results
-    temp_white_pixels = np.sum(temp_mask > 0)
-    # print(f"🔍 Debug - Final selected {temp_white_pixels} pixels ({temp_white_pixels/temp_mask.size*100:.2f}% of image)")
+    # If the combination is too restrictive, use adaptive mask alone
+    if np.sum(temp_mask > 0) < np.sum(adaptive_mask > 0) * 0.3:
+        temp_mask = adaptive_mask
     
     final_mask = temp_mask
     
-    # ULTRA-CONSERVATIVE MORPHOLOGICAL OPERATIONS
-    # Only fill tiny holes, no expansion or aggressive operations
-    
-    # Only apply very light closing to fill tiny holes (1-2 pixel gaps)
-    kernel_tiny = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))  # Tiny kernel only
-    closed_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_tiny)
-    
-    # print(f"🔍 Debug - After tiny closing: {np.sum(closed_mask > 0)} pixels ({np.sum(closed_mask > 0)/closed_mask.size*100:.2f}%)")
-    
-    # No opening or other operations to avoid any shape changes
-    opened_mask = closed_mask
-    
-    # print(f"🔍 Debug - Ultra-conservative operations completed: {np.sum(opened_mask > 0)} pixels ({np.sum(opened_mask > 0)/opened_mask.size*100:.2f}%)")
+    # Minimal morphological operations to fill tiny holes only
+    kernel_tiny = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    opened_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_tiny)
     
     # Find contours and select the largest valid one
     contours, _ = cv2.findContours(opened_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -286,10 +229,9 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
                 aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else float('inf')
                 solidity = area / cv2.contourArea(cv2.convexHull(contour)) if cv2.contourArea(cv2.convexHull(contour)) > 0 else 0
                 
-                # Only accept contours with reasonable shape (not too elongated or fragmented)
-                if aspect_ratio < 10 and solidity > 0.3:  # Reasonable shape constraints
+                # Only accept contours with reasonable shape
+                if aspect_ratio < 10 and solidity > 0.3:
                     valid_contours.append(contour)
-                    # print(f"🔍 Debug - Valid contour: area={area:.0f}, aspect_ratio={aspect_ratio:.2f}, solidity={solidity:.3f}")
         
         if valid_contours:
             # PHASE 2D: ADVANCED CONTOUR SELECTION
@@ -319,7 +261,6 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
                 # Enhanced confidence score based on multiple factors
                 area = cv2.contourArea(main_contour)
                 confidence_score = min(1.0, (area / config.MAX_LESION_AREA) * shape_quality)
-                print(f"✅ Selected best contour: area={area:.0f}, shape_quality={shape_quality:.3f}, confidence={confidence_score:.3f}")
     
     # Calculate quality metrics
     lesion_area = np.sum(final_mask > 0)

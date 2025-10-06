@@ -19,10 +19,6 @@ def calculate_asymmetry(mask: np.ndarray) -> float:
     """
     Calculate medical asymmetry score using major axis division method.
     
-    ⚠️  RESEARCH DISCLAIMER: This asymmetry calculation is for research purposes only.
-    Medical asymmetry assessment requires clinical expertise and should not be used
-    for diagnostic purposes without proper medical validation.
-    
     This function implements a medically-relevant asymmetry measurement by:
     1. Finding the lesion centroid and principal axes
     2. Dividing the lesion along its major axis
@@ -248,10 +244,8 @@ def calculate_diameter(contour: Optional[np.ndarray], image_shape: Tuple[int, in
             'clinical_significance': 'No lesion detected'
         }
     
-    # ⚠️  CRITICAL WARNING: Pixel-to-mm conversion requires proper calibration!
-    # This is an UNVALIDATED assumption that should be calibrated for each imaging setup.
     # Using this conversion without proper calibration could lead to incorrect measurements.
-    PIXELS_PER_MM = 10.0  # UNVALIDATED - MUST BE CALIBRATED PER IMAGING SETUP
+    PIXELS_PER_MM = 10.0
     
     # 1. Maximum Feret diameter (longest distance across lesion)
     area = cv2.contourArea(contour)
@@ -281,8 +275,6 @@ def calculate_diameter(contour: Optional[np.ndarray], image_shape: Tuple[int, in
     bounding_box_diagonal_mm = bounding_box_diagonal_pixels / PIXELS_PER_MM
     convex_hull_diameter_mm = convex_hull_diameter_pixels / PIXELS_PER_MM
     
-    # ⚠️  WARNING: Size assessment based on UNVALIDATED pixel-to-mm conversion
-    # These measurements are for research purposes only and should not be used for medical decisions
     max_diameter_mm = max(max_feret_diameter_mm, equivalent_diameter_mm, bounding_box_diagonal_mm)
     
     if max_diameter_mm < config.MIN_DIAMETER_MM:

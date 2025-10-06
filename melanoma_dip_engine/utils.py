@@ -694,6 +694,130 @@ def visualize_color_clusters(image: np.ndarray, mask: np.ndarray, num_colors: in
     return viz_array
 
 
+def visualize_diameter(image: np.ndarray, mask: np.ndarray, features_or_diameter: Dict[str, float]) -> np.ndarray:
+    """
+    Create visual representation of diameter measurements on the lesion.
+    
+    This function visualizes various diameter measurements by:
+    1. Drawing the lesion contour
+    2. Showing maximum Feret diameter (longest distance)
+    3. Displaying equivalent diameter circle
+    4. Highlighting bounding box diagonal
+    5. Adding measurement annotations
+    
+    Args:
+        image (np.ndarray): Original RGB image
+        mask (np.ndarray): Binary mask of the lesion
+        features_or_diameter: Either a dictionary of all features or a single diameter value
+        
+    Returns:
+        np.ndarray: Visualization image with diameter measurements overlaid
+        
+    DIP Concepts:
+        - Feret Diameter: Maximum distance between any two points on contour
+        - Equivalent Diameter: Diameter of circle with same area as lesion
+        - Bounding Box: Minimum rectangle containing the lesion
+        - Measurement Visualization: Clinical interpretation of size metrics
+    """
+    if np.sum(mask) == 0:
+        return image.copy()
+    
+    # Handle both dictionary and single value inputs
+    if isinstance(features_or_diameter, dict):
+        features = features_or_diameter
+    else:
+        # If single value passed, create a simple features dict
+        features = {'largest_diameter_mm': float(features_or_diameter)}
+    
+    # Create visualization image
+    viz_image = image.copy()
+    
+    # Convert to RGB if needed
+    if len(viz_image.shape) == 3 and viz_image.shape[2] == 3:
+        pass  # Already RGB
+    else:
+        viz_image = cv2.cvtColor(viz_image, cv2.COLOR_GRAY2RGB)
+    
+    # Find contours from mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return viz_image
+    
+    # Get the largest contour
+    contour = max(contours, key=cv2.contourArea)
+    
+    # Draw lesion contour
+    cv2.drawContours(viz_image, [contour], -1, (255, 0, 0), 2)  # Blue contour
+    
+    # Get contour properties
+    area = cv2.contourArea(contour)
+    x, y, w, h = cv2.boundingRect(contour)
+    
+    # 1. Draw bounding box
+    cv2.rectangle(viz_image, (x, y), (x + w, y + h), (0, 255, 0), 2)  # Green bounding box
+    
+    # 2. Draw equivalent diameter circle
+    equivalent_diameter_pixels = features.get('equivalent_diameter_pixels', 0)
+    if equivalent_diameter_pixels > 0:
+        # Find center of contour
+        moments = cv2.moments(contour)
+        if moments['m00'] != 0:
+            cx = int(moments['m10'] / moments['m00'])
+            cy = int(moments['m01'] / moments['m00'])
+            radius = int(equivalent_diameter_pixels / 2)
+            cv2.circle(viz_image, (cx, cy), radius, (255, 255, 0), 2)  # Yellow circle
+    
+    # 3. Draw maximum Feret diameter line
+    max_feret_pixels = features.get('max_feret_diameter_pixels', 0)
+    if max_feret_pixels > 0 and len(contour) > 1:
+        # Find the two points with maximum distance
+        hull = cv2.convexHull(contour)
+        hull_points = hull.reshape(-1, 2)
+        
+        if len(hull_points) > 1:
+            # Calculate all pairwise distances
+            distances = np.linalg.norm(hull_points[:, np.newaxis] - hull_points, axis=2)
+            max_idx = np.unravel_index(np.argmax(distances), distances.shape)
+            
+            point1 = tuple(hull_points[max_idx[0]])
+            point2 = tuple(hull_points[max_idx[1]])
+            
+            # Draw maximum Feret diameter line
+            cv2.line(viz_image, point1, point2, (255, 0, 255), 3)  # Magenta line
+            
+            # Add measurement text
+            mid_x = (point1[0] + point2[0]) // 2
+            mid_y = (point1[1] + point2[1]) // 2
+            
+            # Add diameter measurements as text
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            color = (255, 255, 255)
+            thickness = 2
+            
+            # Maximum Feret diameter
+            max_feret_mm = features.get('max_feret_diameter_mm', 0)
+            cv2.putText(viz_image, f'Max Feret: {max_feret_mm:.1f}mm', 
+                       (mid_x - 50, mid_y - 10), font, font_scale, color, thickness)
+            
+            # Equivalent diameter
+            equivalent_diameter_mm = features.get('equivalent_diameter_mm', 0)
+            cv2.putText(viz_image, f'Equivalent: {equivalent_diameter_mm:.1f}mm', 
+                       (mid_x - 50, mid_y + 15), font, font_scale, color, thickness)
+            
+            # Bounding box diagonal
+            bounding_diagonal_mm = features.get('bounding_box_diagonal_mm', 0)
+            cv2.putText(viz_image, f'Bounding: {bounding_diagonal_mm:.1f}mm', 
+                       (mid_x - 50, mid_y + 40), font, font_scale, color, thickness)
+            
+            # Clinical significance
+            clinical_sig = features.get('clinical_significance', 'Unknown')
+            cv2.putText(viz_image, clinical_sig[:20] + '...', 
+                       (x, y - 20), font, 0.5, (0, 255, 255), 2)  # Cyan text
+    
+    return viz_image
+
+
 def visualize_texture(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
     Visualize texture using Local Binary Pattern (LBP).

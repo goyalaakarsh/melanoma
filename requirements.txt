@@ -1,30 +1,140 @@
-# Core Image Processing Dependencies
-opencv-python>=4.8.0,<5.0.0
-numpy>=1.21.0,<2.0.0
-scikit-image>=0.19.0
-scikit-learn>=1.0.0
-matplotlib>=3.5.0
-scipy>=1.8.0
+# ============================================================================
+# MELANOMA DIP ENGINE - COMPLETE REQUIREMENTS
+# ============================================================================
+# Installation Order: Install PyTorch FIRST, then Detectron2, then everything else
+# See INSTALLATION.md for detailed instructions
 
-# Jupyter and Notebook Dependencies
-jupyterlab>=3.0.0
-jupyter>=1.0.0
-nbconvert>=6.0.0
-ipykernel>=6.0.0
-
-# Data Processing and Visualization
-pandas>=1.4.0
-tabulate>=0.9.0
-
-# Terminal Output and Logging
-colorama>=0.4.4
-
-# PDF Export Dependencies (for notebook to PDF conversion)
-pandoc>=2.0.0
-
-# Development and Testing (Optional)
-pytest>=7.0.0
-pytest-cov>=4.0.0
-
-# Type Checking (Optional)
+# ============================================================================
+# CORE DEPENDENCIES (Install First)
+# ============================================================================
 typing-extensions>=4.0.0
+
+# ============================================================================
+# NUMERICAL COMPUTING & DATA PROCESSING
+# ============================================================================
+numpy>=1.21.0,<2.0.0
+scipy>=1.8.0,<2.0.0
+pandas>=1.4.0,<3.0.0
+
+# ============================================================================
+# IMAGE PROCESSING & COMPUTER VISION
+# ============================================================================
+opencv-python>=4.8.0,<5.0.0
+pillow>=9.0.0,<11.0.0
+scikit-image>=0.19.0,<0.23.0
+imageio>=2.31.0
+
+# ============================================================================
+# MACHINE LEARNING (Classical)
+# ============================================================================
+scikit-learn>=1.0.0,<2.0.0
+
+# ============================================================================
+# DEEP LEARNING - PYTORCH ECOSYSTEM (Install BEFORE Detectron2)
+# ============================================================================
+torch>=2.0.0,<3.0.0
+torchvision>=0.15.0,<1.0.0
+torchaudio>=2.0.0,<3.0.0
+
+# ============================================================================
+# DETECTRON2 DEPENDENCIES (Install BEFORE Detectron2)
+# ============================================================================
+fvcore>=0.1.5,<0.2.0
+iopath>=0.1.9,<0.2.0
+omegaconf>=2.3.0,<3.0.0
+hydra-core>=1.3.0,<2.0.0
+pycocotools>=2.0.6  # Required for COCO format evaluation
+
+# ============================================================================
+# DEEP LEARNING - DETECTRON2 (Install AFTER PyTorch)
+# ============================================================================
+# NOTE: Detectron2 installation is COMMENTED OUT
+# Install separately after torch using one of these methods:
+#
+# Option 1 - From source (recommended for Windows):
+#   pip install git+https://github.com/facebookresearch/detectron2.git
+#
+# Option 2 - Pre-built wheels (Linux/Mac with matching CUDA):
+#   python -m pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu118/torch2.0/index.html
+#
+# Option 3 - Build from source with specific CUDA:
+#   See: https://detectron2.readthedocs.io/en/latest/tutorials/install.html
+
+# ============================================================================
+# DEEP LEARNING - TRANSFORMERS & VISION MODELS
+# ============================================================================
+transformers>=4.30.0,<5.0.0
+huggingface_hub>=0.15.0,<1.0.0
+timm>=0.9.0,<1.0.0
+tokenizers>=0.13.0
+safetensors>=0.3.0
+
+# ============================================================================
+# DATA AUGMENTATION
+# ============================================================================
+albumentations>=1.3.0,<2.0.0
+imgaug>=0.4.0
+
+# ============================================================================
+# VISUALIZATION & PLOTTING
+# ============================================================================
+matplotlib>=3.5.0,<4.0.0
+seaborn>=0.12.0
+
+# ============================================================================
+# JUPYTER & NOTEBOOK ENVIRONMENT
+# ============================================================================
+jupyterlab>=3.0.0,<5.0.0
+jupyter>=1.0.0
+notebook>=6.5.0
+ipython>=8.0.0
+ipykernel>=6.0.0
+ipywidgets>=8.0.0
+nbconvert>=6.0.0,<8.0.0
+nbformat>=5.7.0
+
+# ============================================================================
+# EXPERIMENT TRACKING & MONITORING
+# ============================================================================
+tensorboard>=2.13.0,<3.0.0
+tqdm>=4.64.0,<5.0.0
+
+# ============================================================================
+# UTILITIES & FORMATTING
+# ============================================================================
+tabulate>=0.9.0
+colorama>=0.4.4
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+shapely>=2.0.0
+
+# ============================================================================
+# SYSTEM & FILE OPERATIONS
+# ============================================================================
+psutil>=5.9.0
+
+# ============================================================================
+# TESTING & DEVELOPMENT (Optional)
+# ============================================================================
+pytest>=7.0.0,<8.0.0
+pytest-cov>=4.0.0,<5.0.0
+
+# ============================================================================
+# OPTIONAL - Advanced Features
+# ============================================================================
+# wandb>=0.15.0,<1.0.0  # Uncomment for Weights & Biases tracking
+# plotly>=5.0.0  # Uncomment for interactive plots
+
+# ============================================================================
+# INSTALLATION NOTES
+# ============================================================================
+# Python version: >=3.8,<3.13
+# CUDA version: 11.8+ (for GPU support)
+# 
+# IMPORTANT: Use the installation script for proper setup:
+#   python install_dependencies.py
+#
+# Or follow manual installation order:
+#   1. pip install torch torchvision torchaudio
+#   2. pip install git+https://github.com/facebookresearch/detectron2.git
+#   3. pip install -r requirements.txt

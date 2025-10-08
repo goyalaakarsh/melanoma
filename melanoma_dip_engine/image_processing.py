@@ -185,9 +185,9 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
         gray_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
     )
     
-    # Method 2: HSV Color-based segmentation 
-    hsv_lower = np.array([0, 35, 35])   
-    hsv_upper = np.array([30, 255, 255])
+    # Method 2: HSV Color-based segmentation (improved for diverse skin tones)
+    hsv_lower = np.array([0, 20, 20])   
+    hsv_upper = np.array([179, 255, 255])  # Full hue range for better skin tone coverage
     hsv_mask = cv2.inRange(hsv_image, hsv_lower, hsv_upper)
     
     # Conservative intensity thresholding for boundary validation

@@ -9,6 +9,7 @@ import cv2
 from typing import Tuple, Dict, Any, Optional
 from sklearn.cluster import KMeans
 from skimage.feature import local_binary_pattern
+import config
 
 
 def calculate_dice_coefficient(true_mask: np.ndarray, pred_mask: np.ndarray) -> float:

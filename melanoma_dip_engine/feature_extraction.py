@@ -517,7 +517,7 @@ def extract_all_features(
     quality_metrics = {
         'feature_extraction_complete': True,
         'num_features_extracted': len(all_features),
-        'clinical_validation_passed': contour_area >= config.MIN_LESION_AREA if contour is not None else False
+        'clinical_validation_passed': cv2.contourArea(contour) >= config.MIN_LESION_AREA if contour is not None else False
     }
     
     # Combine everything

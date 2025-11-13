@@ -5,3 +5,5 @@
 /venv/Lib
 /venv/Lib/site-packages
 /melanoma_dip_engine/data
+/.venv
+melanoma_dip_engine/models/ssl_vit_backbone.pth

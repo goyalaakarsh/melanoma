@@ -7,3 +7,4 @@
 /melanoma_dip_engine/data
 /.venv
 melanoma_dip_engine/models/ssl_vit_backbone.pth
+/.venv311

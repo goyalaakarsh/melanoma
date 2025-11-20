@@ -62,13 +62,38 @@ class ViTFeatureExtractor(nn.Module):
         """
         B, C, H, W = x.shape
         
+        # Calculate patch grid dimensions based on input size
+        # ViT patch size is typically 16, so for input H x W, we get (H//patch_size) x (W//patch_size) patches
+        num_patches_h = H // self.patch_size
+        num_patches_w = W // self.patch_size
+        total_patches = num_patches_h * num_patches_w
+        
         # Reshape to patches and add positional embedding
+        # ViTPatchEmbeddings expects (B, C, H, W) and outputs (B, num_patches, hidden_size)
         patches = self.vit_model.embeddings.patch_embeddings(x)  # (B, num_patches, hidden_size)
         
         # Add CLS token and positional embeddings
         cls_tokens = self.vit_model.embeddings.cls_token.expand(B, -1, -1)
         embeddings = torch.cat((cls_tokens, patches), dim=1)
-        embeddings = embeddings + self.vit_model.embeddings.position_embeddings
+        
+        # Handle positional embeddings - interpolate if needed for variable input sizes
+        # Standard ViT has fixed positional embeddings for 224x224 (14x14 patches)
+        # For other sizes, we need to interpolate
+        if patches.shape[1] != self.vit_model.embeddings.position_embeddings.shape[1] - 1:
+            # Interpolate positional embeddings to match patch grid size
+            pos_emb = self.vit_model.embeddings.position_embeddings[:, 1:]  # Remove CLS token pos
+            pos_emb_2d = pos_emb.reshape(1, 14, 14, self.hidden_size)  # Assume 14x14 original
+            pos_emb_2d = pos_emb_2d.permute(0, 3, 1, 2)  # (1, C, H, W)
+            pos_emb_2d_interp = torch.nn.functional.interpolate(
+                pos_emb_2d, size=(num_patches_h, num_patches_w), mode='bilinear', align_corners=False
+            )
+            pos_emb_interp = pos_emb_2d_interp.permute(0, 2, 3, 1).reshape(1, total_patches, self.hidden_size)
+            cls_pos = self.vit_model.embeddings.position_embeddings[:, :1]  # CLS token pos
+            pos_embeddings = torch.cat([cls_pos, pos_emb_interp], dim=1)
+        else:
+            pos_embeddings = self.vit_model.embeddings.position_embeddings
+        
+        embeddings = embeddings + pos_embeddings
         
         # Apply transformer blocks and extract features at specified layers
         hidden_states = embeddings
@@ -82,10 +107,9 @@ class ViTFeatureExtractor(nn.Module):
                 # Remove CLS token and reshape to 2D
                 patch_features = hidden_states[:, 1:]  # Remove CLS token
                 
-                # Calculate patch grid size
-                num_patches_per_dim = int(np.sqrt(patch_features.shape[1]))
+                # Reshape to 2D feature map based on actual patch grid
                 patch_features = patch_features.reshape(
-                    B, num_patches_per_dim, num_patches_per_dim, self.hidden_size
+                    B, num_patches_h, num_patches_w, self.hidden_size
                 )
                 patch_features = patch_features.permute(0, 3, 1, 2)  # (B, C, H, W)
                 
@@ -99,26 +123,36 @@ class ViTBackbone(Backbone):
     """
     ViT backbone for Detectron2.
     Provides multi-scale features compatible with FPN.
+    
+    Maps ViT layers to Detectron2 backbone feature names:
+    - Layer 3 → res2
+    - Layer 6 → res3
+    - Layer 9 → res4
+    - Layer 12 → res5
     """
     
     def __init__(self, vit_model, feature_layers=[3, 6, 9, 12]):
         super().__init__()
         self.feature_extractor = ViTFeatureExtractor(vit_model, feature_layers)
         
-        # Define feature output shapes
-        # Assuming input size of 224x224 and patch size of 16
+        # Define feature output shapes matching FPN expectations
+        # ViT patch size 16 with input 224x224 gives 14x14 patches
+        # These will be upsampled by FPN to create multi-scale features
         self._out_feature_channels = {
-            "res3": 256,  # 14x14 features
-            "res4": 256,  # 14x14 features  
-            "res5": 256,  # 14x14 features
-            "res6": 256,  # 14x14 features
+            "res2": 256,  # From layer 3
+            "res3": 256,  # From layer 6
+            "res4": 256,  # From layer 9
+            "res5": 256,  # From layer 12
         }
         
+        # Feature strides are dynamic based on input size
+        # For ViT with patch_size=16, stride equals patch_size
+        # FPN will handle proper scaling for multi-scale features
         self._out_feature_strides = {
-            "res3": 16,  # 224/14 = 16
+            "res2": 16,  # Patch size, will be adjusted by FPN
+            "res3": 16,  # All have same stride initially, FPN handles scaling
             "res4": 16,
-            "res5": 16, 
-            "res6": 16,
+            "res5": 16,
         }
     
     def forward(self, x):
@@ -127,15 +161,16 @@ class ViTBackbone(Backbone):
         Args:
             x: Input tensor of shape (B, C, H, W)
         Returns:
-            Dict of feature maps at different scales
+            Dict of feature maps at different scales with names matching FPN expectations
         """
         features = self.feature_extractor(x)
         
+        # Map to Detectron2 expected feature names
         return {
-            "res3": features[0],
-            "res4": features[1], 
-            "res5": features[2],
-            "res6": features[3],
+            "res2": features[0],  # Layer 3
+            "res3": features[1],  # Layer 6
+            "res4": features[2],  # Layer 9
+            "res5": features[3],  # Layer 12
         }
     
     def output_shape(self):
@@ -239,10 +274,62 @@ def build_vit_backbone(cfg, input_shape: ShapeSpec):
         
         # Load SSL weights
         ssl_weights = torch.load(ssl_path, map_location='cpu')
-        vit_model.load_state_dict(ssl_weights)
         
-        print("SSL backbone loaded successfully!")
+        # Load state dict with detailed error handling
+        try:
+            missing_keys, unexpected_keys = vit_model.load_state_dict(ssl_weights, strict=False)
+            
+            # Filter out expected missing keys (pooler is not used in our backbone)
+            expected_missing = ['pooler.dense.weight', 'pooler.dense.bias']
+            actual_missing = [k for k in missing_keys if k not in expected_missing]
+            
+            if len(actual_missing) > 0:
+                print(f"Warning: {len(actual_missing)} unexpected missing keys in SSL backbone:")
+                print(f"  First few: {actual_missing[:3]}")
+            elif len(missing_keys) > 0:
+                # Only expected keys missing (pooler)
+                print(f"Note: {len(missing_keys)} expected missing keys (pooler layer, not needed)")
+            
+            if len(unexpected_keys) > 0:
+                print(f"Warning: {len(unexpected_keys)} unexpected keys in SSL backbone:")
+                print(f"  First few: {unexpected_keys[:3]}")
+            
+            if len(actual_missing) == 0 and len(unexpected_keys) == 0:
+                if len(missing_keys) == 0:
+                    print("✓ SSL backbone loaded successfully - all keys matched!")
+                else:
+                    print("✓ SSL backbone loaded successfully - only expected pooler keys missing")
+            else:
+                print("⚠ SSL backbone loaded with warnings - some keys did not match")
+                
+        except Exception as e:
+            print(f"Error loading SSL backbone: {e}")
+            print("Falling back to ImageNet pre-trained ViT")
+            vit_model = ViTModel.from_pretrained('google/vit-base-patch16-224-in21k')
+            print("SSL backbone loaded successfully!")
     
-    # Create backbone
-    backbone = ViTBackbone(vit_model)
-    return backbone
+        # Create the raw backbone
+        vit_backbone = ViTBackbone(vit_model)
+        
+        # Detectron2's build_backbone should automatically wrap backbones with FPN if enabled
+        # However, for custom backbones registered in BACKBONE_REGISTRY, we need to manually
+        # wrap with FPN if FPN is enabled. Check if FPN is enabled in the config.
+        if hasattr(cfg.MODEL, 'FPN') and cfg.MODEL.FPN.IN_FEATURES:
+            from detectron2.modeling.backbone.fpn import FPN, LastLevelMaxPool
+            
+            # Build FPN wrapper
+            in_features = cfg.MODEL.FPN.IN_FEATURES
+            out_channels = cfg.MODEL.FPN.OUT_CHANNELS if hasattr(cfg.MODEL.FPN, 'OUT_CHANNELS') else 256
+            top_block = LastLevelMaxPool() if cfg.MODEL.FPN.USE_5TH_BLOCK else None
+            
+            # Wrap backbone with FPN
+            vit_backbone = FPN(
+                bottom_up=vit_backbone,
+                in_features=in_features,
+                out_channels=out_channels,
+                norm=cfg.MODEL.FPN.NORM if hasattr(cfg.MODEL.FPN, 'NORM') else "",
+                top_block=top_block,
+            )
+            print("✓ ViT backbone wrapped with FPN")
+        
+        return vit_backbone

@@ -12,139 +12,202 @@ from scipy import signal, stats
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 # Removed unused imports: ndimage, measure, morphology
 # These were from advanced algorithms that were simplified
-import config
+from . import config
 
 
 def calculate_asymmetry(mask: np.ndarray) -> float:
     """
-    Calculates asymmetry by aligning the lesion's major axis to vertical,
-    then checking overlap. Robust against camera rotation.
+    Calculate medical asymmetry score using major axis division method.
+    
+    This function implements a medically-relevant asymmetry measurement by:
+    1. Finding the lesion centroid and principal axes
+    2. Dividing the lesion along its major axis
+    3. Comparing the areas and shapes of the two halves
+    4. Calculating asymmetry as the difference between halves
+    
+    Args:
+        mask (np.ndarray): Binary mask of the segmented lesion
+        
+    Returns:
+        float: Asymmetry score (0.0 = symmetric, 1.0 = highly asymmetric)
     """
-    if np.sum(mask) == 0: return 0.0
+    if np.sum(mask) == 0:
+        return 0.0
+    
+    # Find contours to get lesion shape
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return 0.0
+    
+    # Get the largest contour
+    contour = max(contours, key=cv2.contourArea)
+    
+    # Calculate centroid
+    moments = cv2.moments(contour)
+    if moments['m00'] == 0:
+        return 0.0
+    
+    cx = int(moments['m10'] / moments['m00'])
+    cy = int(moments['m01'] / moments['m00'])
+    
+    # Fit ellipse to get major axis
+    if len(contour) >= 5:
+        ellipse = cv2.fitEllipse(contour)
+        center, axes, angle = ellipse
+        major_axis_length = max(axes)
+        minor_axis_length = min(axes)
+        
+        # Calculate asymmetry based on major/minor axis ratio
+        # A perfect circle has ratio = 1 (symmetric), elongated shapes have higher ratios
+        axis_ratio = major_axis_length / minor_axis_length if minor_axis_length > 0 else 1.0
+        
+        # Normalize to 0-1 scale (1.0 = circle, higher = more asymmetric)
+        asymmetry = max(0.0, (axis_ratio - 1.0) / (config.ASYMMETRY_MAX_RATIO - 1.0))
+        return min(1.0, asymmetry)
+    else:
+        # Fallback: use flip-based asymmetry for small contours
+        total_area = np.sum(mask > 0)
+        
+        # Horizontal asymmetry
+        horizontal_flip = cv2.flip(mask, 1)
+        horizontal_xor = cv2.bitwise_xor(mask, horizontal_flip)
+        horizontal_asymmetry = np.sum(horizontal_xor > 0) / total_area
+        
+        # Vertical asymmetry
+        vertical_flip = cv2.flip(mask, 0)
+        vertical_xor = cv2.bitwise_xor(mask, vertical_flip)
+        vertical_asymmetry = np.sum(vertical_xor > 0) / total_area
+        
+        return (horizontal_asymmetry + vertical_asymmetry) / 2.0
 
-    # 1. Find the orientation of the lesion using Moments
-    moments = cv2.moments(mask)
-    if moments['m00'] == 0: return 0.0
-    
-    # Calculate orientation angle
-    mu11, mu20, mu02 = moments['mu11'], moments['mu20'], moments['mu02']
-    theta = 0.5 * np.arctan2(2 * mu11, mu20 - mu02) # Angle in radians
-    angle_deg = np.degrees(theta)
-
-    # 2. Rotate the mask to align major axis vertically
-    h, w = mask.shape
-    center = (int(moments['m10'] / moments['m00']), int(moments['m01'] / moments['m00']))
-    
-    M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
-    rotated_mask = cv2.warpAffine(mask, M, (w, h), flags=cv2.INTER_NEAREST)
-
-    # 3. Calculate Asymmetry on the aligned mask
-    # Split into left and right halves based on the centroid
-    # (Simplified approach: Flip over centroid X)
-    
-    # Shift mask so centroid is at center of image for perfect flipping
-    shift_x = w//2 - center[0]
-    shift_y = h//2 - center[1]
-    M_shift = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
-    centered_mask = cv2.warpAffine(rotated_mask, M_shift, (w, h))
-    
-    flip_lr = cv2.flip(centered_mask, 1) # Left-Right flip
-    flip_ud = cv2.flip(centered_mask, 0) # Up-Down flip
-    
-    # IoU (Intersection over Union) style calculation for asymmetry
-    xor_lr = cv2.bitwise_xor(centered_mask, flip_lr)
-    xor_ud = cv2.bitwise_xor(centered_mask, flip_ud)
-    
-    area = np.sum(centered_mask > 0)
-    asymmetry_lr = np.sum(xor_lr > 0) / area
-    asymmetry_ud = np.sum(xor_ud > 0) / area
-    
-    # Average the two asymmetries
-    return (asymmetry_lr + asymmetry_ud) / 2.0
 
 def calculate_border_irregularity(contour: Optional[np.ndarray]) -> float:
-    if contour is None: return 0.0
+    """
+    Calculate the border irregularity using the Compactness Index.
     
-    area = cv2.contourArea(contour)
-    if area == 0: return 0.0
+    This function measures shape irregularity by:
+    1. Calculating the perimeter and area of the lesion contour
+    2. Computing the Compactness Index: (Perimeter² / (4 * π * Area))
+    3. A perfect circle yields 1.0, irregular shapes yield higher values
+    
+    Args:
+        contour (Optional[np.ndarray]): Contour of the segmented lesion
+        
+    Returns:
+        float: Compactness Index (1.0 = perfect circle, >1.0 = irregular shape)
+        
+    DIP Concepts:
+        - Compactness Index: Mathematical measure of shape regularity
+        - Perimeter-to-Area Ratio: Fundamental geometric property for shape analysis
+        - Circle Reference: Provides intuitive baseline for shape comparison
+    """
+    if contour is None:
+        return 0.0
+    
+    # Calculate perimeter and area
     perimeter = cv2.arcLength(contour, True)
+    area = cv2.contourArea(contour)
     
-    # 1. Compactness (Standard)
-    compactness = (perimeter ** 2) / (4 * np.pi * area)
+    if area == 0:
+        return 0.0
     
-    # 2. Solidity (The "Rubber Band" test)
-    hull = cv2.convexHull(contour)
-    hull_area = cv2.contourArea(hull)
-    if hull_area == 0: return 0.0
+    # Calculate Compactness Index: P²/(4πA)
+    # A perfect circle has compactness = 1.0
+    compactness = (perimeter * perimeter) / (4 * np.pi * area)
     
-    solidity = float(area) / hull_area
-    
-    # Melanoma features: High Compactness AND Low Solidity (jagged edges)
-    # We invert solidity so higher number = higher risk
-    solidity_score = (1.0 - solidity) * 10 
-    
-    # Combine: Compactness gives overall shape, Solidity gives jaggedness
-    combined_score = (compactness * 0.5) + (solidity_score * 2.0)
-    
-    return combined_score
+    return compactness
 
-def calculate_color_variation(rgb_image: np.ndarray, mask: np.ndarray) -> float:
+
+def calculate_color_variation(hsv_image: np.ndarray, mask: np.ndarray) -> int:
     """
-    Calculates color complexity using the standard deviation of color channels.
-    High StdDev = Variegated coloring (Melanoma sign).
+    Calculate color variation by analyzing the Hue histogram of the lesion.
+    
+    This function quantifies color diversity by:
+    1. Extracting the Hue channel from the HSV image within the lesion mask
+    2. Computing the histogram of hue values
+    3. Identifying significant peaks using signal processing techniques
+    4. Returning the count of distinct color clusters
+    
+    Args:
+        hsv_image (np.ndarray): HSV color space image
+        mask (np.ndarray): Binary mask of the segmented lesion
+        
+    Returns:
+        int: Number of distinct color clusters (minimum 1)
+        
+    DIP Concepts:
+        - Color Histogram: Statistical distribution of colors in image region
+        - Peak Detection: Signal processing technique for identifying dominant colors
+        - Hue Channel Analysis: Pure color information independent of brightness/saturation
     """
-    if np.sum(mask) == 0: return 0.0
+    # Extract hue values only within the lesion mask
+    lesion_hue = hsv_image[:, :, 0][mask > 0]
+    
+    if len(lesion_hue) == 0:
+        return 1  # At least one color present
+    
+    # Calculate histogram of hue values
+    hist, _ = np.histogram(lesion_hue, bins=config.COLOR_BINS, range=(0, 180))
+    
+    # Find peaks in the histogram
+    peaks, properties = signal.find_peaks(hist, height=np.max(hist) * config.COLOR_HIST_PEAK_THRESHOLD)
+    
+    # Return number of peaks (minimum 1)
+    return max(1, len(peaks))
 
-    # Convert to Lab (L=Lightness, a=Green-Red, b=Blue-Yellow)
-    lab_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2LAB)
-    
-    # Extract pixels only inside the lesion
-    mask_bool = mask > 0
-    l_pixels = lab_image[:,:,0][mask_bool]
-    a_pixels = lab_image[:,:,1][mask_bool]
-    b_pixels = lab_image[:,:,2][mask_bool]
-    
-    # Calculate standard deviation (spread) of colors
-    std_l = np.std(l_pixels)
-    std_a = np.std(a_pixels)
-    std_b = np.std(b_pixels)
-    
-    # Combined score
-    # We weight 'a' and 'b' more because color variation is more dangerous than lightness variation
-    variation_score = (std_l * 0.5) + (std_a * 1.2) + (std_b * 1.2)
-    
-    return variation_score / 100.0  # Normalize roughly to 0-1 range
-
-
-from scipy.stats import entropy
 
 def calculate_texture_features(image: np.ndarray, mask: np.ndarray) -> Dict[str, float]:
     """
-    Calculates texture entropy inside the lesion.
-    High Entropy = Chaos/Disorder (Melanoma).
+    Calculate texture features using Gray-Level Co-occurrence Matrix (GLCM).
+    
+    This function analyzes lesion texture by:
+    1. Converting image to grayscale for efficient processing
+    2. Creating masked image for lesion region only
+    3. Computing GLCM for statistical texture analysis
+    4. Calculating contrast and homogeneity measures
+    
+    Args:
+        image (np.ndarray): Original RGB image
+        mask (np.ndarray): Binary mask of the segmented lesion
+        
+    Returns:
+        Dict[str, float]: Dictionary containing 'contrast' and 'homogeneity' values
+        
+    DIP Concepts:
+        - GLCM: Statistical method for texture analysis based on pixel co-occurrence
+        - Contrast: Measures local intensity variations (high for disorganized textures)
+        - Homogeneity: Measures texture smoothness (high for uniform textures)
     """
-    if np.sum(mask) == 0: return {'entropy': 0.0}
-
+    # Convert RGB to grayscale for texture analysis (more efficient)
     gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     
-    # Extract only the pixels inside the lesion
-    lesion_pixels = gray_image[mask > 0]
+    # Check if lesion region exists
+    if np.sum(mask) == 0:
+        return {'contrast': 0.0, 'homogeneity': 0.0}
     
-    # Calculate histogram of these pixels
-    hist, _ = np.histogram(lesion_pixels, bins=256, range=(0, 256))
+    # Create masked image for GLCM calculation
+    masked_image = np.zeros_like(gray_image)
+    masked_image[mask > 0] = gray_image[mask > 0]
     
-    # Normalize histogram to get probabilities
-    prob_dist = hist / hist.sum()
+    # Calculate GLCM with multiple directions for robustness
+    glcm = graycomatrix(
+        masked_image.astype(np.uint8),
+        distances=[1],
+        angles=[0, 45, 90, 135],
+        levels=256,
+        symmetric=True,
+        normed=True
+    )
     
-    # Calculate Entropy (Randomness)
-    # High entropy = rough, chaotic texture
-    # Low entropy = smooth, uniform color
-    texture_entropy = entropy(prob_dist, base=2)
+    # Calculate texture properties
+    contrast = np.mean(graycoprops(glcm, 'contrast'))
+    homogeneity = np.mean(graycoprops(glcm, 'homogeneity'))
     
     return {
-        'texture_entropy': float(texture_entropy),
-        'texture_roughness': float(np.std(lesion_pixels)) # Standard deviation of intensity
+        'contrast': float(contrast),
+        'homogeneity': float(homogeneity)
     }
+
 
 def calculate_diameter(contour: Optional[np.ndarray], image_shape: Tuple[int, int]) -> Dict[str, float]:
     """

@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'melanoma_dip_e
 
 # Attempt imports
 try:
-    import src.image_processing as ip
-    import src.feature_extraction as fe
+    import image_processing as ip
+    import feature_extraction as fe
 except ImportError:
     st.error("⚠️ DIP Engine modules not found. Ensure the directory structure is correct.")
     st.stop()

@@ -59,3 +59,24 @@ TEXTURE_CONTRAST_NORMALIZATION: float = 100.0  # For normalizing texture contras
 OVERLAY_ALPHA: float = 0.4  # Transparency for overlay visualization
 FIGURE_SIZE: Tuple[int, int] = (15, 12)  # Larger figures for better detail
 DPI: int = 300  # High DPI for publication-quality figures
+
+# --- Advanced DIP: Gray World Color Constancy Parameters ---
+GRAY_WORLD_ENABLED: bool = True  # Enable Gray World color correction for illumination normalization
+GRAY_WORLD_TARGET_MEAN: int = 128  # Target mean for LAB a* and b* channels (neutral gray)
+
+# --- Advanced DIP: GrabCut Segmentation Refinement Parameters ---
+GRABCUT_ENABLED: bool = True  # Enable GrabCut refinement for precise boundary detection
+GRABCUT_ITERATIONS: int = 5  # Number of GrabCut iterations for convergence
+GRABCUT_MARGIN: int = 10  # Margin pixels for trimap generation (erode/dilate)
+
+# --- Advanced DIP: FFT Frequency Domain Analysis Parameters ---
+FFT_ENABLED: bool = True  # Enable FFT frequency analysis for texture characterization
+FFT_RADIUS_RATIO: float = 0.1  # Percentage of image size for high-pass filter (mask center)
+FFT_HIGH_FREQ_THRESHOLD: float = 0.5  # Threshold for high-frequency energy classification
+
+# --- Advanced DIP: Blue-White Veil Detection Parameters ---
+BLUE_WHITE_VEIL_ENABLED: bool = True  # Enable blue-white veil detection (melanoma indicator)
+VEIL_THRESHOLD_VALUE: int = 30  # Luminance offset for veil detection (0-255 range)
+VEIL_MIN_LUMINANCE: float = 0.5  # Minimum normalized luminance (0.0-1.0)
+VEIL_MIN_BLUE_DOMINANCE: float = 0.05  # Minimum blue channel dominance over R and G
+VEIL_MIN_COVERAGE: float = 0.01  # Minimum 1% lesion coverage to report veil presence

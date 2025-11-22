@@ -187,6 +187,32 @@ def print_feature_summary(features: dict) -> None:
     print(f"\n🔸 Texture Homogeneity: {glcm_homogeneity:.3f}")
     print("   (Higher values indicate more uniform texture)")
     
+    # Advanced DIP Features
+    print("\n🔬 ADVANCED DIP FEATURES:")
+    print("-" * 40)
+    
+    # FFT Analysis
+    fft_high_freq = features.get('fft_high_frequency_energy', 0.0)
+    fft_ratio = features.get('fft_high_low_ratio', 0.0)
+    print(f"🔸 FFT High-Frequency Energy: {fft_high_freq:.4f}")
+    print(f"🔸 FFT High/Low Ratio: {fft_ratio:.4f}")
+    if fft_high_freq > 0.5:
+        print("   ⚠️  High frequency content detected (irregular texture)")
+    else:
+        print("   ✅ Low frequency content (smooth texture)")
+    
+    # Blue-White Veil
+    bwv_present = features.get('blue_white_veil_present', 0.0)
+    bwv_coverage = features.get('blue_white_veil_coverage_percentage', 0.0)
+    bwv_confidence = features.get('blue_white_veil_confidence', 0.0)
+    print(f"\n🔸 Blue-White Veil: {'DETECTED' if bwv_present else 'NOT DETECTED'}")
+    print(f"   Coverage: {bwv_coverage:.2f}% of lesion area")
+    print(f"   Confidence: {bwv_confidence:.3f}")
+    if bwv_present:
+        print("   🚨 Blue-white veil is a melanoma indicator")
+    else:
+        print("   ✅ No blue-white veil detected")
+    
     # Clinical Risk Assessment
     print("\n🚨 CLINICAL RISK ASSESSMENT:")
     print("-" * 40)
@@ -905,3 +931,212 @@ def visualize_texture(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     plt.close(fig)
 
     return viz_array
+
+
+def visualize_advanced_features(image, mask, features):
+    '''Visualize Advanced DIP features: FFT spectrum and Blue-White Veil detection.'''
+    import matplotlib.pyplot as plt
+    import config
+    
+    if image is None or mask is None or np.sum(mask) == 0:
+        return image.copy()
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Advanced DIP Feature Analysis', fontsize=18, fontweight='bold')
+    
+    # FFT Magnitude Spectrum
+    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    masked_region = gray_image.copy()
+    masked_region[mask == 0] = 0
+    
+    fft = np.fft.fft2(masked_region)
+    fft_shifted = np.fft.fftshift(fft)
+    magnitude_spectrum = np.abs(fft_shifted)
+    magnitude_spectrum_log = np.log1p(magnitude_spectrum)
+    
+    axes[0, 0].imshow(magnitude_spectrum_log, cmap='hot')
+    axes[0, 0].set_title('FFT Magnitude Spectrum (Log Scale)', fontweight='bold', fontsize=12)
+    axes[0, 0].axis('off')
+    
+    # High-Frequency Energy
+    rows, cols = magnitude_spectrum.shape
+    center_row, center_col = rows // 2, cols // 2
+    radius = int(min(rows, cols) * config.FFT_RADIUS_RATIO)
+    
+    y, x = np.ogrid[:rows, :cols]
+    mask_circle = (x - center_col)**2 + (y - center_row)**2 <= radius**2
+    high_freq_mask = ~mask_circle
+    
+    high_freq_viz = magnitude_spectrum_log.copy()
+    high_freq_viz[~high_freq_mask] = 0
+    
+    axes[0, 1].imshow(high_freq_viz, cmap='viridis')
+    axes[0, 1].set_title(f'High-Frequency Components\nEnergy: {features.get("fft_high_frequency_energy", 0):.3f}', 
+                        fontweight='bold', fontsize=12)
+    axes[0, 1].axis('off')
+    
+    # Blue-White Veil Detection
+    image_float = image.astype(np.float32) / 255.0
+    r_channel = image_float[:, :, 0]
+    g_channel = image_float[:, :, 1]
+    b_channel = image_float[:, :, 2]
+    
+    luminance = 0.2126 * r_channel + 0.7152 * g_channel + 0.0722 * b_channel
+    
+    blue_dominant = (b_channel > r_channel + config.VEIL_MIN_BLUE_DOMINANCE) & (b_channel > g_channel + config.VEIL_MIN_BLUE_DOMINANCE)
+    high_luminance = luminance > config.VEIL_MIN_LUMINANCE
+    veil_mask = blue_dominant & high_luminance & (mask > 0)
+    
+    veil_overlay = image.copy()
+    veil_overlay[veil_mask] = [0, 255, 255]
+    blended = cv2.addWeighted(image, 0.6, veil_overlay, 0.4, 0)
+    
+    axes[1, 0].imshow(blended)
+    veil_status = 'DETECTED' if features.get('blue_white_veil_present', 0) else 'NOT DETECTED'
+    axes[1, 0].set_title(f'Blue-White Veil Detection\nStatus: {veil_status}', fontweight='bold', fontsize=12)
+    axes[1, 0].axis('off')
+    
+    # Metrics Summary
+    axes[1, 1].axis('off')
+    
+    fft_high = features.get('fft_high_frequency_energy', 0)
+    fft_ratio = features.get('fft_high_low_ratio', 0)
+    veil_coverage = features.get('blue_white_veil_coverage_percentage', 0)
+    
+    metrics_text = f'''
+    ADVANCED DIP METRICS
+    ========================================
+    
+    FFT Frequency Analysis:
+       High-Freq Energy: {fft_high:.4f}
+       High/Low Ratio: {fft_ratio:.4f}
+    
+    Blue-White Veil Detection:
+       Status: {veil_status}
+       Coverage: {veil_coverage:.2f}%
+    
+    For research purposes only
+    '''
+    
+    axes[1, 1].text(0.1, 0.5, metrics_text, transform=axes[1, 1].transAxes,
+                   fontsize=11, verticalalignment='center', family='monospace',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    fig.canvas.draw()
+    if hasattr(fig.canvas, 'tostring_rgb'):
+        viz_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    else:
+        viz_array = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        viz_array = viz_array.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+        viz_array = viz_array[:, :, :3]
+    
+    plt.close(fig)
+    return viz_array
+
+
+def visualize_color_correction_comparison(original, corrected):
+    '''Visualize the effect of Gray World color constancy correction.'''
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig.suptitle('Gray World Color Constancy Correction', fontsize=16, fontweight='bold')
+    
+    axes[0, 0].imshow(original)
+    axes[0, 0].set_title('Original Image', fontweight='bold')
+    axes[0, 0].axis('off')
+    
+    axes[0, 1].imshow(corrected)
+    axes[0, 1].set_title('Color-Corrected Image', fontweight='bold')
+    axes[0, 1].axis('off')
+    
+    diff = cv2.absdiff(original, corrected)
+    axes[0, 2].imshow(diff)
+    axes[0, 2].set_title('Absolute Difference', fontweight='bold')
+    axes[0, 2].axis('off')
+    
+    colors = ('r', 'g', 'b')
+    for i, color in enumerate(colors):
+        hist_orig = cv2.calcHist([original], [i], None, [256], [0, 256])
+        axes[1, 0].plot(hist_orig, color=color, alpha=0.7, label=f'{color.upper()} channel')
+    axes[1, 0].set_title('Original Histograms', fontweight='bold')
+    axes[1, 0].legend()
+    axes[1, 0].grid(alpha=0.3)
+    
+    for i, color in enumerate(colors):
+        hist_corr = cv2.calcHist([corrected], [i], None, [256], [0, 256])
+        axes[1, 1].plot(hist_corr, color=color, alpha=0.7, label=f'{color.upper()} channel')
+    axes[1, 1].set_title('Corrected Histograms', fontweight='bold')
+    axes[1, 1].legend()
+    axes[1, 1].grid(alpha=0.3)
+    
+    mean_orig = [np.mean(original[:, :, i]) for i in range(3)]
+    mean_corr = [np.mean(corrected[:, :, i]) for i in range(3)]
+    
+    x = np.arange(3)
+    width = 0.35
+    axes[1, 2].bar(x - width/2, mean_orig, width, label='Original', color=['red', 'green', 'blue'], alpha=0.7)
+    axes[1, 2].bar(x + width/2, mean_corr, width, label='Corrected', color=['darkred', 'darkgreen', 'darkblue'], alpha=0.7)
+    axes[1, 2].set_title('Channel Mean Values', fontweight='bold')
+    axes[1, 2].set_xticks(x)
+    axes[1, 2].set_xticklabels(['Red', 'Green', 'Blue'])
+    axes[1, 2].legend()
+    
+    plt.tight_layout()
+    plt.show()
+
+
+def visualize_grabcut_comparison(image, initial_mask, refined_mask, metrics):
+    '''Visualize the improvement from GrabCut refinement.'''
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig.suptitle('GrabCut Segmentation Refinement', fontsize=16, fontweight='bold')
+    
+    axes[0, 0].imshow(image)
+    axes[0, 0].imshow(initial_mask, cmap='jet', alpha=0.4)
+    axes[0, 0].set_title('Initial Segmentation', fontweight='bold')
+    axes[0, 0].axis('off')
+    
+    axes[0, 1].imshow(image)
+    axes[0, 1].imshow(refined_mask, cmap='jet', alpha=0.4)
+    axes[0, 1].set_title('GrabCut Refined', fontweight='bold')
+    axes[0, 1].axis('off')
+    
+    diff = cv2.absdiff(initial_mask, refined_mask)
+    axes[0, 2].imshow(diff, cmap='hot')
+    axes[0, 2].set_title('Refinement Changes', fontweight='bold')
+    axes[0, 2].axis('off')
+    
+    overlay_init = image.copy()
+    overlay_init[initial_mask > 0] = [255, 0, 0]
+    blended_init = cv2.addWeighted(image, 0.6, overlay_init, 0.4, 0)
+    axes[1, 0].imshow(blended_init)
+    axes[1, 0].set_title('Initial Overlay', fontweight='bold')
+    axes[1, 0].axis('off')
+    
+    overlay_ref = image.copy()
+    overlay_ref[refined_mask > 0] = [0, 255, 0]
+    blended_ref = cv2.addWeighted(image, 0.6, overlay_ref, 0.4, 0)
+    axes[1, 1].imshow(blended_ref)
+    axes[1, 1].set_title('Refined Overlay', fontweight='bold')
+    axes[1, 1].axis('off')
+    
+    axes[1, 2].axis('off')
+    metrics_text = f'''
+    GRABCUT REFINEMENT METRICS
+    ===================================
+    
+    Applied: {metrics.get("grabcut_applied", False)}
+    Iterations: {metrics.get("grabcut_iterations", 0)}
+    
+    Area Changes:
+       Initial: {metrics.get("initial_area", 0):,} pixels
+       Refined: {metrics.get("refined_area", 0):,} pixels
+       Change: {metrics.get("area_change_percent", 0):.2f}%
+    '''
+    
+    axes[1, 2].text(0.1, 0.5, metrics_text, transform=axes[1, 2].transAxes,
+                   fontsize=11, verticalalignment='center', family='monospace',
+                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.show()

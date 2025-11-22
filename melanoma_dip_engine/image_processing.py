@@ -12,6 +12,13 @@ import config
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
+
+# NOTE: Gray World color constancy removed per clinical feedback.
+# Skin lesion images have non-neutral average chromaticity (often red/pink). Forcing
+# gray-world normalization was distorting diagnostically relevant color cues (e.g., blue-white veil).
+# We retain only luminance enhancement (CLAHE on L channel) and leave chroma (a/b) untouched.
+
+
 def load_and_preprocess(image_path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Load an image from file path and preprocess it for analysis with equity-focused enhancements.
@@ -70,12 +77,14 @@ def load_and_preprocess(image_path: str) -> Tuple[np.ndarray, np.ndarray, np.nda
     # Resize image to standard size using high-quality interpolation
     rgb_resized = cv2.resize(rgb_image, config.IMAGE_SIZE, interpolation=cv2.INTER_LANCZOS4)
     
+    # Removed Gray World color constancy (see note above) to preserve true dermatologic colors.
+    
     # Apply equity-focused preprocessing
     if config.CONTRAST_ENHANCEMENT:
-        # CLAHE (Contrast Limited Adaptive Histogram Equalization) for better contrast
+        # CLAHE ONLY on L (luminance) channel; do not alter a/b chroma components.
         lab_temp = cv2.cvtColor(rgb_resized, cv2.COLOR_RGB2LAB)
         clahe = cv2.createCLAHE(clipLimit=config.CLAHE_CLIP_LIMIT, tileGridSize=config.CLAHE_TILE_SIZE)
-        lab_temp[:,:,0] = clahe.apply(lab_temp[:,:,0])
+        lab_temp[:, :, 0] = clahe.apply(lab_temp[:, :, 0])
         rgb_resized = cv2.cvtColor(lab_temp, cv2.COLOR_LAB2RGB)
     
     # Convert to HSV color space
@@ -277,5 +286,110 @@ def segment_lesion(image: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray],
     }
     
     return final_mask, main_contour, quality_metrics
+
+
+def refine_segmentation_grabcut(
+    image: np.ndarray, 
+    initial_mask: np.ndarray, 
+    contour: Optional[np.ndarray]
+) -> Tuple[np.ndarray, Optional[np.ndarray], Dict[str, float]]:
+    """
+    Refine lesion segmentation using GrabCut algorithm with morphology-based trimap initialization.
+    
+    GrabCut is a graph-cut based segmentation technique that models foreground and background
+    using Gaussian Mixture Models (GMMs). This function uses the initial segmentation to create
+    a precise trimap that guides the GrabCut optimization.
+    
+    Args:
+        image (np.ndarray): Original RGB image
+        initial_mask (np.ndarray): Initial binary segmentation mask
+        contour (Optional[np.ndarray]): Initial contour of the lesion
+        
+    Returns:
+        Tuple[np.ndarray, Optional[np.ndarray], Dict[str, float]]:
+            - Refined binary mask
+            - Refined contour
+            - Quality metrics dictionary
+            
+    DIP Concepts:
+        - Graph Cut Optimization: Minimizes energy function for optimal segmentation
+        - Gaussian Mixture Models: Models color distributions of FG/BG
+        - Trimap Initialization: Guides optimization with confident regions
+        - Morphological Operations: Erosion/dilation for definite FG/BG regions
+    """
+    if not config.GRABCUT_ENABLED:
+        return initial_mask, contour, {'grabcut_applied': False}
+    
+    if image is None or initial_mask is None or np.sum(initial_mask) == 0:
+        return initial_mask, contour, {'grabcut_applied': False}
+    
+    # Create GrabCut mask (0=BG, 1=FG, 2=Probable BG, 3=Probable FG)
+    gc_mask = np.zeros(initial_mask.shape, dtype=np.uint8)
+    
+    # Generate trimap using morphological operations
+    # Erosion creates "definite foreground" (confident lesion region)
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (config.GRABCUT_MARGIN, config.GRABCUT_MARGIN))
+    definite_fg = cv2.erode(initial_mask, kernel_erode, iterations=1)
+    
+    # Dilation creates "definite background" (everything outside is background)
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (config.GRABCUT_MARGIN * 2, config.GRABCUT_MARGIN * 2))
+    dilated_mask = cv2.dilate(initial_mask, kernel_dilate, iterations=1)
+    
+    # Set trimap labels
+    gc_mask[dilated_mask == 0] = cv2.GC_BGD  # 0 = Definite Background
+    gc_mask[definite_fg > 0] = cv2.GC_FGD    # 1 = Definite Foreground
+    gc_mask[(dilated_mask > 0) & (definite_fg == 0)] = cv2.GC_PR_FGD  # 3 = Probable Foreground (uncertainty region)
+    
+    # Initialize background and foreground models
+    bgd_model = np.zeros((1, 65), dtype=np.float64)
+    fgd_model = np.zeros((1, 65), dtype=np.float64)
+    
+    try:
+        # Run GrabCut optimization
+        cv2.grabCut(
+            image, 
+            gc_mask, 
+            None,  # No rectangle initialization (using mask mode)
+            bgd_model, 
+            fgd_model, 
+            config.GRABCUT_ITERATIONS, 
+            cv2.GC_INIT_WITH_MASK
+        )
+        
+        # Extract refined mask (combine definite and probable foreground)
+        refined_mask = np.where((gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+        
+        # Find refined contour
+        refined_contours, _ = cv2.findContours(refined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        refined_contour = None
+        
+        if refined_contours:
+            # Select largest contour
+            refined_contour = max(refined_contours, key=cv2.contourArea)
+            
+            # Validate refined contour area
+            area = cv2.contourArea(refined_contour)
+            if area < config.MIN_LESION_AREA or area > config.MAX_LESION_AREA:
+                # If refined contour is invalid, keep original
+                return initial_mask, contour, {'grabcut_applied': False, 'reason': 'invalid_area'}
+        
+        # Calculate improvement metrics
+        initial_area = np.sum(initial_mask > 0)
+        refined_area = np.sum(refined_mask > 0)
+        area_change_percent = abs(refined_area - initial_area) / initial_area * 100 if initial_area > 0 else 0
+        
+        metrics = {
+            'grabcut_applied': True,
+            'grabcut_iterations': config.GRABCUT_ITERATIONS,
+            'initial_area': int(initial_area),
+            'refined_area': int(refined_area),
+            'area_change_percent': float(area_change_percent)
+        }
+        
+        return refined_mask, refined_contour, metrics
+        
+    except Exception as e:
+        # If GrabCut fails, return original mask
+        return initial_mask, contour, {'grabcut_applied': False, 'error': str(e)}
 
 

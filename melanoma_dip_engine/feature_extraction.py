@@ -88,32 +88,61 @@ def calculate_border_irregularity(contour: Optional[np.ndarray]) -> float:
     
     return combined_score
 
-def calculate_color_variation(rgb_image: np.ndarray, mask: np.ndarray) -> float:
+def calculate_color_variation(rgb_image: np.ndarray, mask: np.ndarray) -> int:
     """
-    Calculates color complexity using the standard deviation of color channels.
-    High StdDev = Variegated coloring (Melanoma sign).
+    Calculates the number of distinct colors in the lesion using K-means clustering.
+    
+    ABCD Rule - C (Color): Counts distinct colors (1-6 scale):
+    - 1 color: Uniform (benign tendency)
+    - 2-3 colors: Moderate variation
+    - 4-5 colors: High variation (suspicious)
+    - 6+ colors: Very high variation (melanoma sign)
+    
+    Range: 1-6 (discrete integer)
+    
+    Args:
+        rgb_image (np.ndarray): RGB image
+        mask (np.ndarray): Binary lesion mask
+        
+    Returns:
+        int: Number of distinct colors (1-6)
     """
-    if np.sum(mask) == 0: return 0.0
+    if np.sum(mask) == 0: return 1
 
-    # Convert to Lab (L=Lightness, a=Green-Red, b=Blue-Yellow)
-    lab_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2LAB)
-    
-    # Extract pixels only inside the lesion
+    # Extract lesion pixels in RGB
     mask_bool = mask > 0
-    l_pixels = lab_image[:,:,0][mask_bool]
-    a_pixels = lab_image[:,:,1][mask_bool]
-    b_pixels = lab_image[:,:,2][mask_bool]
+    lesion_pixels = rgb_image[mask_bool].reshape(-1, 3).astype(np.float32)
     
-    # Calculate standard deviation (spread) of colors
-    std_l = np.std(l_pixels)
-    std_a = np.std(a_pixels)
-    std_b = np.std(b_pixels)
+    if len(lesion_pixels) < 10:
+        return 1
     
-    # Combined score
-    # We weight 'a' and 'b' more because color variation is more dangerous than lightness variation
-    variation_score = (std_l * 0.5) + (std_a * 1.2) + (std_b * 1.2)
+    # Use K-means to find distinct colors (try k=2 to k=6)
+    from sklearn.cluster import KMeans
     
-    return variation_score / 100.0  # Normalize roughly to 0-1 range
+    max_colors = 6
+    best_k = 1
+    
+    # Test different numbers of clusters
+    for k in range(2, max_colors + 1):
+        try:
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10, max_iter=100)
+            kmeans.fit(lesion_pixels)
+            
+            # Check cluster sizes - each cluster should have reasonable number of pixels
+            labels, counts = np.unique(kmeans.labels_, return_counts=True)
+            min_cluster_size = len(lesion_pixels) * 0.02  # At least 2% of pixels
+            
+            # Count significant clusters
+            significant_clusters = np.sum(counts >= min_cluster_size)
+            
+            if significant_clusters == k:
+                best_k = k
+            else:
+                break  # Stop if clusters are too small
+        except:
+            break
+    
+    return min(best_k, 6)  # Cap at 6 colors
 
 
 from scipy.stats import entropy
@@ -353,6 +382,187 @@ def calculate_advanced_texture_features(image: np.ndarray, mask: np.ndarray) -> 
     return all_features
 
 
+def analyze_frequency_domain(image: np.ndarray, mask: np.ndarray) -> Dict[str, float]:
+    """
+    Analyze texture using Fast Fourier Transform (FFT) in the frequency domain.
+    
+    This function performs frequency domain analysis to detect periodic patterns and texture irregularities.
+    High-frequency energy correlates with chaotic, irregular textures typical of melanoma.
+    
+    Args:
+        image (np.ndarray): Input RGB image
+        mask (np.ndarray): Binary mask of segmented lesion
+        
+    Returns:
+        Dict[str, float]: Dictionary containing FFT features:
+            - fft_high_frequency_energy: Mean energy in high-frequency components
+            - fft_low_frequency_energy: Mean energy in low-frequency components
+            - fft_high_low_ratio: Ratio of high to low frequency energy
+            - fft_total_energy: Total frequency domain energy
+            
+    DIP Concepts:
+        - Fast Fourier Transform: Converts spatial domain to frequency domain
+        - Frequency Spectrum: Magnitude of frequency components
+        - High-Pass Filtering: Isolates high-frequency texture details
+        - Spectral Energy: Measures texture complexity and irregularity
+    """
+    if not config.FFT_ENABLED:
+        return {
+            'fft_high_frequency_energy': 0.0,
+            'fft_low_frequency_energy': 0.0,
+            'fft_high_low_ratio': 0.0,
+            'fft_total_energy': 0.0
+        }
+    
+    if image is None or mask is None or np.sum(mask) == 0:
+        return {
+            'fft_high_frequency_energy': 0.0,
+            'fft_low_frequency_energy': 0.0,
+            'fft_high_low_ratio': 0.0,
+            'fft_total_energy': 0.0
+        }
+    
+    # Convert to grayscale for frequency analysis
+    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    
+    # Extract lesion region of interest
+    masked_region = gray_image.copy()
+    masked_region[mask == 0] = 0
+    
+    # Perform 2D Fast Fourier Transform
+    fft = np.fft.fft2(masked_region)
+    fft_shifted = np.fft.fftshift(fft)  # Shift zero-frequency to center
+    
+    # Calculate magnitude spectrum (logarithmic scale for visualization)
+    magnitude_spectrum = np.abs(fft_shifted)
+    
+    # Create high-pass filter mask (mask out center low frequencies)
+    rows, cols = magnitude_spectrum.shape
+    center_row, center_col = rows // 2, cols // 2
+    
+    # Calculate radius for low-frequency masking
+    radius = int(min(rows, cols) * config.FFT_RADIUS_RATIO)
+    
+    # Create circular mask for low frequencies
+    y, x = np.ogrid[:rows, :cols]
+    mask_circle = (x - center_col)**2 + (y - center_row)**2 <= radius**2
+    
+    # Separate low and high frequency components
+    low_freq_mask = mask_circle.astype(float)
+    high_freq_mask = 1.0 - low_freq_mask
+    
+    # Calculate energy in low and high frequency regions
+    low_freq_energy = np.sum(magnitude_spectrum * low_freq_mask)
+    high_freq_energy = np.sum(magnitude_spectrum * high_freq_mask)
+    total_energy = np.sum(magnitude_spectrum)
+    
+    # Calculate ratio (high frequency / low frequency)
+    high_low_ratio = high_freq_energy / low_freq_energy if low_freq_energy > 0 else 0.0
+    
+    # Normalize energies by total energy
+    normalized_high = high_freq_energy / total_energy if total_energy > 0 else 0.0
+    normalized_low = low_freq_energy / total_energy if total_energy > 0 else 0.0
+    
+    return {
+        'fft_high_frequency_energy': float(normalized_high),
+        'fft_low_frequency_energy': float(normalized_low),
+        'fft_high_low_ratio': float(high_low_ratio),
+        'fft_total_energy': float(total_energy)
+    }
+
+
+def detect_blue_white_veil(image: np.ndarray, mask: np.ndarray) -> Dict[str, float]:
+    """
+    Detect presence of blue-white veil, a dermoscopic indicator of invasive melanoma.
+    
+    Blue-white veil appears as a confluent gray-blue to white pigmentation that obscures
+    visualization of underlying skin structures. It is a highly specific sign of melanoma.
+    
+    Args:
+        image (np.ndarray): Input RGB image
+        mask (np.ndarray): Binary mask of segmented lesion
+        
+    Returns:
+        Dict[str, float]: Dictionary containing blue-white veil features:
+            - blue_white_veil_present: 1.0 if present, 0.0 if absent
+            - blue_white_veil_coverage_percentage: Percentage of lesion with veil
+            - blue_white_veil_intensity: Average intensity of veil region
+            - blue_white_veil_confidence: Confidence score (0.0-1.0)
+            
+    DIP Concepts:
+        - Color Space Analysis: RGB normalization for illumination invariance
+        - Channel Comparison: Blue dominance over red and green
+        - Luminance Thresholding: Ensures sufficient brightness
+        - Morphological Analysis: Validates veil region connectivity
+    """
+    if not config.BLUE_WHITE_VEIL_ENABLED:
+        return {
+            'blue_white_veil_present': 0.0,
+            'blue_white_veil_coverage_percentage': 0.0,
+            'blue_white_veil_intensity': 0.0,
+            'blue_white_veil_confidence': 0.0
+        }
+    
+    if image is None or mask is None or np.sum(mask) == 0:
+        return {
+            'blue_white_veil_present': 0.0,
+            'blue_white_veil_coverage_percentage': 0.0,
+            'blue_white_veil_intensity': 0.0,
+            'blue_white_veil_confidence': 0.0
+        }
+    
+    # Use ORIGINAL (un-normalized) image to preserve true chromatic relationships.
+    # Convert to float for ratio-based analysis.
+    image_float = image.astype(np.float32) / 255.0
+
+    r_channel = image_float[:, :, 0]
+    g_channel = image_float[:, :, 1]
+    b_channel = image_float[:, :, 2]
+
+    luminance = 0.2126 * r_channel + 0.7152 * g_channel + 0.0722 * b_channel
+
+    # Relaxed blue-white veil criteria (ratio + relative enhancement):
+    # 1. (B + G) > R * 1.2  (bluish / cyan dominance over red)
+    # 2. B/R > 1.1          (blue component elevated relative to red)
+    # 3. B > mean(B) + 0.5*std(B) (localized blue elevation)
+    # 4. High luminance to ensure "veil" (not just dark blue)
+    mean_b = np.mean(b_channel)
+    std_b = np.std(b_channel)
+    blue_green_dom = (b_channel + g_channel) > (r_channel * 1.2)
+    blue_ratio_dom = (r_channel > 0) & ((b_channel / (r_channel + 1e-6)) > 1.1)
+    blue_local_enhanced = b_channel > (mean_b + 0.5 * std_b)
+    high_luminance = luminance > config.VEIL_MIN_LUMINANCE
+
+    veil_mask = blue_green_dom & blue_ratio_dom & blue_local_enhanced & high_luminance
+    
+    # Apply lesion mask (only consider veil within lesion)
+    veil_mask = veil_mask & (mask > 0)
+    
+    # Calculate veil coverage
+    lesion_area = np.sum(mask > 0)
+    veil_area = np.sum(veil_mask)
+    coverage_percentage = (veil_area / lesion_area * 100) if lesion_area > 0 else 0.0
+    
+    # Determine presence based on coverage threshold
+    veil_present = coverage_percentage >= (config.VEIL_MIN_COVERAGE * 100)
+    
+    # Calculate average intensity of veil region
+    if veil_area > 0:
+        veil_intensity = np.mean(b_channel[veil_mask])
+        # Confidence based on coverage and intensity
+        confidence = min(1.0, (coverage_percentage / 10.0) * veil_intensity)
+    else:
+        veil_intensity = 0.0
+        confidence = 0.0
+    
+    return {
+        'blue_white_veil_present': float(veil_present),
+        'blue_white_veil_coverage_percentage': float(coverage_percentage),
+        'blue_white_veil_intensity': float(veil_intensity),
+        'blue_white_veil_confidence': float(confidence)
+    }
+
+
 def calculate_feature_scores(features: Dict[str, float]) -> Dict[str, float]:
     """
     Calculate normalized feature scores for research and educational purposes only.
@@ -360,6 +570,15 @@ def calculate_feature_scores(features: Dict[str, float]) -> Dict[str, float]:
     ⚠️  MEDICAL DISCLAIMER: This function provides objective feature measurements only.
     It does NOT provide medical diagnosis, risk assessment, or clinical recommendations.
     All results are for research and educational purposes only.
+    
+    Feature Ranges (Raw Values):
+    - Asymmetry: 0.0 to 1.0 (0.0 = perfect symmetry, 1.0 = complete asymmetry)
+    - Border Irregularity: 1.0 to ~10.0 (1.0 = perfect circle, higher = more irregular)
+    - Color Variation: 1 to 6 discrete colors (1 = uniform, 6 = highly variegated)
+    - Diameter: 0.0 to 100.0 mm (clinical significance at 6mm+)
+    - Texture Contrast: 0.0 to 300+ (GLCM contrast, higher = more irregular)
+    
+    Normalized Scores: All converted to 0.0-1.0 scale for comparison
     
     Args:
         features (Dict[str, float]): Dictionary of extracted features
@@ -370,17 +589,27 @@ def calculate_feature_scores(features: Dict[str, float]) -> Dict[str, float]:
     # Normalize individual feature scores (0-1, higher = more irregular)
     # These are objective measurements only, not clinical risk assessments
     
-    asymmetry_score = min(1.0, features.get('asymmetry', 0.0) / config.ASYMMETRY_NORMALIZATION)
-    border_score = min(1.0, (features.get('border_irregularity', 1.0) - 1.0) / config.BORDER_IRREGULARITY_NORMALIZATION)
-    color_score = min(1.0, (features.get('color_variation', 1.0) - 1.0) / config.COLOR_VARIATION_NORMALIZATION)
-    diameter_score = min(1.0, (features.get('largest_diameter_mm', 0.0) - 2.0) / 8.0)  # 2-10mm range
-    texture_score = min(1.0, features.get('glcm_contrast', 0.0) / config.TEXTURE_CONTRAST_NORMALIZATION)
+    # Asymmetry: Already in 0-1 range, multiply by 2 for sensitivity (cap at 1.0)
+    asymmetry_score = min(1.0, features.get('asymmetry', 0.0) * 2.0)
+    
+    # Border: Normalize with tighter scaling per clinical feedback
+    # (score - 1.0) / 2.0 elevates moderate irregularity appropriately.
+    border_raw = features.get('border_irregularity', 1.0)
+    border_score = min(1.0, max(0.0, (border_raw - 1.0) / 2.0))
+    
+    # Color: Discrete 1-6, normalize to 0-1
+    # (1 color = 0.0, 6 colors = 1.0)
+    color_count = features.get('color_variation', 1)
+    color_score = min(1.0, (color_count - 1) / 5.0)
+    
+    # Texture: 0-300+ range, normalize to 0-1
+    texture_contrast = features.get('glcm_contrast', 0.0)
+    texture_score = min(1.0, texture_contrast / 200.0)
     
     return {
         'asymmetry_score': asymmetry_score,
         'border_irregularity_score': border_score,
         'color_variation_score': color_score,
-        'diameter_score': diameter_score,
         'texture_contrast_score': texture_score,
         'research_note': 'These scores are for research purposes only. Consult a healthcare professional for medical assessment.'
     }
@@ -444,8 +673,14 @@ def extract_all_features(
     # Calculate advanced texture features
     texture_features = calculate_advanced_texture_features(original_image, mask)
     
+    # Advanced DIP: FFT Frequency Domain Analysis
+    fft_features = analyze_frequency_domain(original_image, mask)
+    
+    # Advanced DIP: Blue-White Veil Detection
+    blue_white_veil_features = detect_blue_white_veil(original_image, mask)
+    
     # Combine all features
-    all_features = {**basic_features, **diameter_features, **texture_features}
+    all_features = {**basic_features, **diameter_features, **texture_features, **fft_features, **blue_white_veil_features}
     
     # Calculate normalized feature scores for research purposes only
     feature_scores = calculate_feature_scores(all_features)

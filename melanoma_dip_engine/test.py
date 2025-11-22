@@ -22,13 +22,15 @@ warnings.filterwarnings("ignore")
 
 # ==============================================================================
 # 1. CONFIGURATION
+# Ensemble of two melanoma classifier checkpoints
 # ==============================================================================
-MODEL_CLS_PATH = r'melanoma_pipeline_v2/models/melanoma_classifier_opt.pt' 
+MODEL_CLS_PATH_A = r'melanoma_pipeline_v2/models/melanoma_classifier_opt3.pt'
+MODEL_CLS_PATH_B = r'melanoma_pipeline_v2/models/melanoma_classifier_opt.pt'
 BENIGN_FOLDER = r"malignant_and_benign/test/benign"
 MELANOMA_FOLDER = r"malignant_and_benign/test/melanoma"
 
 # Sampling
-SAMPLE_SIZE = 100  # Images per class
+SAMPLE_SIZE = 10  # Images per class
 
 # Classification threshold
 THRESHOLD = 0.5  # Standard threshold
@@ -101,7 +103,9 @@ def predict_ensemble(model_A, model_B, image_path, melanoma_idx):
 print("="*100)
 print("🧪 MELANOMA TEST DIAGNOSTIC - LABELED DATA EVALUATION")
 print("="*100)
-print(f"⚙️  Model:           {MODEL_CLS_PATH}")
+print(f"⚙️  Model A:         {MODEL_CLS_PATH_A}")
+print(f"⚙️  Model B:         {MODEL_CLS_PATH_B}")
+print(f"⚙️  Ensemble:        Mean probability (A+B)/2")
 print(f"⚙️  Benign Folder:   {BENIGN_FOLDER}")
 print(f"⚙️  Melanoma Folder: {MELANOMA_FOLDER}")
 print(f"⚙️  Sample Size:     {SAMPLE_SIZE} per class")
@@ -111,24 +115,32 @@ print("-" * 100)
 
 # Load Model
 try:
-    cls_model = YOLO(MODEL_CLS_PATH)
-    print("✅ Model loaded successfully")
+    cls_model_A = YOLO(MODEL_CLS_PATH_A)
+    cls_model_B = YOLO(MODEL_CLS_PATH_B)
+    print("✅ Both models loaded successfully")
 except Exception as e:
-    print(f"❌ Error loading model: {e}")
+    print(f"❌ Error loading one of the models: {e}")
     sys.exit(1)
 
-# Identify Class Indices
-melanoma_idx = -1
-for k, v in cls_model.names.items():
+# Identify Melanoma class index for each model (allow differing mappings)
+melanoma_idx_A = -1
+for k, v in cls_model_A.names.items():
     if 'melanoma' in v.lower() or 'malignant' in v.lower():
-        melanoma_idx = k
+        melanoma_idx_A = k
         break
 
-if melanoma_idx == -1:
-    print("❌ CRITICAL: Could not find 'Melanoma' class index.")
+melanoma_idx_B = -1
+for k, v in cls_model_B.names.items():
+    if 'melanoma' in v.lower() or 'malignant' in v.lower():
+        melanoma_idx_B = k
+        break
+
+if melanoma_idx_A == -1 or melanoma_idx_B == -1:
+    print("❌ CRITICAL: Could not find 'Melanoma' class index in both models.")
     sys.exit(1)
 
-print(f"ℹ️  Melanoma Index: {melanoma_idx}\n")
+print(f"ℹ️  Melanoma Index A: {melanoma_idx_A}")
+print(f"ℹ️  Melanoma Index B: {melanoma_idx_B}\n")
 
 # ==============================================================================
 # 4. LOAD AND SAMPLE IMAGES
@@ -187,8 +199,13 @@ for i, item in enumerate(test_data):
     true_label = item['true_label']
     true_class = item['true_class']
     
-    # Predict with TTA
-    p_melanoma, p_benign = predict_with_manual_tta(cls_model, img_path, melanoma_idx)
+    # Predict with TTA for each model then ensemble
+    p_melanoma_A, p_benign_A = predict_with_manual_tta(cls_model_A, img_path, melanoma_idx_A)
+    p_melanoma_B, p_benign_B = predict_with_manual_tta(cls_model_B, img_path, melanoma_idx_B)
+
+    # Ensemble (mean) probabilities
+    p_melanoma = (p_melanoma_A + p_melanoma_B) / 2.0
+    p_benign = (p_benign_A + p_benign_B) / 2.0
     
     # Classification decision
     if p_melanoma >= THRESHOLD:
@@ -216,6 +233,8 @@ for i, item in enumerate(test_data):
         'predicted_label': predicted_label,
         'p_melanoma': p_melanoma,
         'p_benign': p_benign,
+        'p_melanoma_A': p_melanoma_A,
+        'p_melanoma_B': p_melanoma_B,
         'outcome': outcome,
         'correct': is_correct,
         'true_class': true_class,

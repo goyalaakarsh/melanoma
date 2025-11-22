@@ -10,3 +10,4 @@ melanoma_dip_engine/models/ssl_vit_backbone.pth
 /.venv311
 /yolo_classification/dataset
 melanoma_dip_engine/data.zip
+/malignant_and_benign

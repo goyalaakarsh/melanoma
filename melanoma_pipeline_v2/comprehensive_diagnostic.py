@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore")
 # 1. CONFIGURATION
 # ==============================================================================
 # CHECK THESE PATHS
-MODEL_CLS_PATH = r'melanoma_pipeline_v2/models/melanoma_classifier_opt.pt' 
+MODEL_CLS_PATH = r'melanoma_pipeline_v2/models/melanoma_classifier_opt3.pt' 
 IMAGES_FOLDER = r"melanoma_dip_engine/data/train/images" 
 
 # MEDICAL SETTINGS

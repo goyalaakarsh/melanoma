@@ -28,7 +28,7 @@ BENIGN_FOLDER = r"malignant_and_benign/test/benign"
 MELANOMA_FOLDER = r"malignant_and_benign/test/melanoma"
 
 # Sampling
-SAMPLE_SIZE = 360  # Images per class
+SAMPLE_SIZE = 100  # Images per class
 
 # Classification threshold
 THRESHOLD = 0.5  # Standard threshold

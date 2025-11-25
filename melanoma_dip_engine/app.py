@@ -452,23 +452,17 @@ def preprocess_from_array(image_arr):
 # --- MAIN APP ---
 def main():
     # Header
-    st.markdown('<h1 class="main-title">Melanoma DIP Engine</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-title">Melanoma Risk Prediction for Triage & Decision Support</h1>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Configuration")
-        st.info("System optimized for Dark Mode.")
         uploaded_file = st.file_uploader("Upload Image", type=['jpg', 'jpeg', 'png', 'bmp'])
         
         st.write("---")
         st.markdown("### 📊 Models")
-        st.success("• YOLOv11 Classification")
+        st.success("• YOLO11 Classification")
         st.success("• ABCT Feature Engine")
         st.success("• Advanced DIP (GrabCut, FFT, BWV)")
-        
-        st.write("---")
-        st.markdown("### ℹ️ Information")
-        st.info("This tool is for research purposes only. Not a medical device.")
     
     # Main Logic
     if not uploaded_file:
@@ -516,32 +510,52 @@ def main():
         
     with col2:
         st.write("") # Spacer
-        p_mel = res.get('p_mel', 0.0)
-        is_melanoma = res.get('is_melanoma', False)
-        
-        if is_melanoma:
-            st.markdown("""
-            <div class="risk-banner risk-high">
-                <h1>⚠️ HIGH RISK DETECTED</h1>
-                <p>AI Confidence: {:.1f}% (Threshold: 35%)</p>
-            </div>
-            """.format(p_mel * 100), unsafe_allow_html=True)
+        # Calculate risk based on features only, not YOLO classification
+        overall_risk = 0.0
+        if res.get('features_extracted', False):
+            features = res['features']
+            asym_score = features.get('asymmetry_score', 0)
+            border_score = features.get('border_irregularity_score', 0)
+            color_score = features.get('color_variation_score', 0)
+            texture_score = features.get('texture_contrast_score', 0)
+            overall_risk = (asym_score + border_score + color_score + texture_score) / 4.0
+            risk_level, risk_color = get_risk_level(overall_risk)
+            
+            if risk_level == "HIGH":
+                st.markdown("""
+                <div class="risk-banner risk-high">
+                    <h1>⚠️ HIGH RISK DETECTED</h1>
+                </div>
+                """, unsafe_allow_html=True)
+            elif risk_level == "MODERATE":
+                st.markdown("""
+                <div class="risk-banner risk-moderate">
+                    <h1>⚠️ MODERATE RISK DETECTED</h1>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="risk-banner risk-low">
+                    <h1>✅ LOW RISK</h1>
+                </div>
+                """, unsafe_allow_html=True)
         else:
             st.markdown("""
             <div class="risk-banner risk-low">
-                <h1>✅ LOW RISK (BENIGN)</h1>
-                <p>AI Confidence: {:.1f}% (Below threshold)</p>
+                <h1>⏳ PROCESSING...</h1>
+                <p>Feature extraction in progress</p>
             </div>
-            """.format(p_mel * 100), unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
     
     with col3:
         st.write("") # Spacer
-        st.plotly_chart(create_gauge_chart(p_mel, "Malignancy Probability"), use_container_width=True)
+        # Show overall risk from features in gauge, not YOLO confidence
+        st.plotly_chart(create_gauge_chart(overall_risk, "Risk Score"), use_container_width=True)
 
     # ==========================================
     # 2. TABS FOR DETAILED VIEW
     # ==========================================
-    st.write("---")
+    # st.write("---")
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Overview", 
         "🔬 Clinical Features (ABCD+T)", 
@@ -587,47 +601,31 @@ def main():
             overall_risk = (asym_score + border_score + color_score + texture_score) / 4.0
             risk_level, risk_color = get_risk_level(overall_risk)
             
-            st.write("---")
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                st.markdown("### 🎯 Overall Risk Assessment")
-                st.markdown(f"""
-                <div style="padding: 20px; border-radius: 10px; background: rgba(255,255,255,0.05);">
-                    <h2 style="color: {risk_color}; margin: 0;">{risk_level} RISK</h2>
-                    <p style="font-size: 1.2em; margin: 10px 0;">Combined Score: {overall_risk:.3f}</p>
-                    <small>Based on ABCD+T features</small>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown("### 📏 Diameter Information")
-                diameter_mm = features.get('largest_diameter_mm', 0)
-                clinical_sig = features.get('clinical_significance', 'Unknown')
-                st.metric("Largest Diameter", f"{diameter_mm:.2f} mm")
-                st.caption(clinical_sig)
-            
+    
             # Pipeline Images
             st.write("---")
             st.markdown("### 🔄 Processing Pipeline")
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.markdown("##### 1. Hair Removal")
+                st.markdown("##### 1. Original Image")
+                st.image(img_arr, use_container_width=True)
+            
+            with col2:
+                st.markdown("##### 2. Color Corrected")
+                if 'rgb_preprocessed' in res:
+                    st.image(res['rgb_preprocessed'], use_container_width=True)
+            
+            with col3:
+                st.markdown("##### 3. Hair Removal")
                 if 'hair_free' in res:
                     st.image(res['hair_free'], use_container_width=True)
             
-            with col2:
-                st.markdown("##### 2. Segmentation")
+            with col4:
+                st.markdown("##### 4. Segmentation")
                 if 'mask' in res and res['mask'] is not None:
                     overlay = utils.create_overlay_image(res['hair_free'], res['mask'])
                     st.image(overlay, use_container_width=True)
-            
-            with col3:
-                st.markdown("##### 3. Feature Analysis")
-                if 'features' in res:
-                    st.info("✅ All features extracted successfully")
-                    st.caption(f"Total features: {len(res['features'])}")
         else:
             st.warning("⚠️ Feature extraction incomplete. Check segmentation results.")
     

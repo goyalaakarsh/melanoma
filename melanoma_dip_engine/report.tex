@@ -101,13 +101,13 @@ Morphology/color border selection & 2019 & PH2, ISIC2017 & Dice: 0.884/0.796 \\ 
 
 The proposed melanoma risk prediction system follows a modular, interpretable pipeline that transforms raw dermoscopic images into clinically meaningful risk assessments. The architecture is explicitly designed to prioritize transparency, robustness across diverse skin tones, and integration into non-specialist clinical workflows. 
 
-This section presents the methodology organized into three main components: (1) \textbf{Classification} using YOLOv11 deep learning model trained on ISIC 2019 and PH2 datasets (approximately 10,000 images) achieving 93\% accuracy, (2) \textbf{Segmentation} employing multi-method fusion with GrabCut refinement for precise lesion boundary detection, and (3) \textbf{Feature Analysis} extracting comprehensive ABCD+T clinical biomarkers for interpretable risk scoring. Each component is detailed in the following subsections, with preprocessing and artifact removal stages supporting all three components.
+This section presents the methodology organized into three main components: (1) \textbf{Classification} using YOLO11 deep learning model trained on ISIC 2019 and PH2 datasets (approximately 10,000 images) achieving 93\% accuracy, (2) \textbf{Segmentation} employing multi-method fusion with GrabCut refinement for precise lesion boundary detection, and (3) \textbf{Feature Analysis} extracting comprehensive ABCD+T clinical biomarkers for interpretable risk scoring. Each component is detailed in the following subsections, with preprocessing and artifact removal stages supporting all three components.
 
 \subsection{System Architecture}
 
 The overall system architecture follows a sequential pipeline comprising five major stages: (1) image preprocessing and normalization, (2) artifact removal, (3) lesion segmentation with refinement, (4) comprehensive feature extraction, and (5) interpretable risk scoring. This design ensures that each stage produces outputs that can be visually validated and clinically interpreted, addressing the black-box limitations of end-to-end deep learning approaches.
 
-The implementation is built using open-source Python libraries (OpenCV, NumPy, scikit-image, scikit-learn) and integrates a YOLOv11 classification model for initial triage. All image processing operations are performed at a standardized resolution of 512×512 pixels to ensure consistent feature extraction while maintaining computational efficiency. The system is deployed as an interactive Streamlit web application, enabling real-time analysis with immediate visualization of intermediate processing steps.
+The implementation is built using open-source Python libraries (OpenCV, NumPy, scikit-image, scikit-learn) and integrates a YOLO11 classification model for initial triage. All image processing operations are performed at a standardized resolution of 512×512 pixels to ensure consistent feature extraction while maintaining computational efficiency. The system is deployed as an interactive Streamlit web application, enabling real-time analysis with immediate visualization of intermediate processing steps.
 
 % Figure placeholder for system architecture
 % \begin{figure}[htbp]
@@ -117,19 +117,19 @@ The implementation is built using open-source Python libraries (OpenCV, NumPy, s
 % \label{fig:architecture}
 % \end{figure}
 
-\subsection{Classification: YOLOv11 Deep Learning Model}
+\subsection{Classification: YOLO11 Deep Learning Model}
 
-The classification component employs YOLOv11, a state-of-the-art object detection and classification framework, for binary melanoma classification. This deep learning approach provides high-accuracy initial triage while complementing the interpretable feature-based analysis pipeline.
+The classification component employs YOLO11, a state-of-the-art object detection and classification framework, for binary melanoma classification. This deep learning approach provides high-accuracy initial triage while complementing the interpretable feature-based analysis pipeline.
 
 \subsubsection{Model Architecture and Training}
 
-The YOLOv11 model was trained on a combined dataset comprising ISIC 2019 and PH2 dermoscopic images, totaling approximately 10,000 images. The training dataset includes diverse lesion types: common nevi, atypical nevi, and melanomas, ensuring robust representation of the classification task. Data augmentation techniques including horizontal and vertical flips, rotations, and color space transformations were applied to improve generalization and reduce overfitting.
+The YOLO11 model was trained on a combined dataset comprising ISIC 2019 and PH2 dermoscopic images, totaling approximately 10,000 images. The training dataset includes diverse lesion types: common nevi, atypical nevi, and melanomas, ensuring robust representation of the classification task. Data augmentation techniques including horizontal and vertical flips, rotations, and color space transformations were applied to improve generalization and reduce overfitting.
 
-The model architecture follows the YOLOv11 design optimized for medical image classification, with input resolution of 512×512 pixels to match the preprocessing pipeline. Training was performed using transfer learning from ImageNet pretrained weights, followed by fine-tuning on the dermoscopic image dataset. The binary classification head outputs probability scores for melanoma and benign classes, with a confidence threshold of 0.35 determined through validation on held-out test data.
+The model architecture follows the YOLO11 design optimized for medical image classification, with input resolution of 512×512 pixels to match the preprocessing pipeline. Training was performed using transfer learning from ImageNet pretrained weights, followed by fine-tuning on the dermoscopic image dataset. The binary classification head outputs probability scores for melanoma and benign classes, with a confidence threshold of 0.35 determined through validation on held-out test data.
 
 \subsubsection{Performance and Integration}
 
-The trained YOLOv11 model achieves 93\% accuracy on the combined test set, with 91.2\% sensitivity and 94.5\% specificity. These results demonstrate state-of-the-art classification performance while maintaining computational efficiency suitable for real-time clinical deployment. The model processes images in approximately 0.5-1.0 seconds on standard CPU hardware, enabling rapid triage decisions.
+The trained YOLO11 model achieves 93\% accuracy on the combined test set, with 91.2\% sensitivity and 94.5\% specificity. These results demonstrate state-of-the-art classification performance while maintaining computational efficiency suitable for real-time clinical deployment. The model processes images in approximately 0.5-1.0 seconds on standard CPU hardware, enabling rapid triage decisions.
 
 The classification output is integrated into the overall risk assessment framework as an independent triage signal. The YOLO probability score provides a complementary assessment to the interpretable feature-based risk scoring, enabling a dual-assessment approach that combines the accuracy of deep learning with the transparency of clinical feature analysis. This integration allows clinicians to leverage both automated classification confidence and detailed feature breakdowns when making triage decisions.
 
@@ -255,7 +255,7 @@ The extracted features are normalized to a common 0-1 scale and aggregated into 
 
 The overall risk score is computed as the arithmetic mean of normalized ABCD+T scores: $R = \frac{A_n + B_n + C_n + T_n}{4}$, where subscript $n$ indicates normalized values. This simple aggregation ensures transparency and allows clinicians to understand how each feature contributes to the final assessment. Risk levels are categorized as: Low ($R < 0.3$), Moderate ($0.3 \leq R < 0.7$), and High ($R \geq 0.7$).
 
-The system integrates YOLOv11 classification probabilities (93\% accuracy) as an independent triage signal alongside the interpretable feature-based risk scoring. This dual-assessment approach—combining deep learning classification with clinical feature analysis—provides both state-of-the-art accuracy and transparency essential for clinical adoption.
+The system integrates YOLO11 classification probabilities (93\% accuracy) as an independent triage signal alongside the interpretable feature-based risk scoring. This dual-assessment approach—combining deep learning classification with clinical feature analysis—provides both state-of-the-art accuracy and transparency essential for clinical adoption.
 
 \subsection{Implementation and Deployment}
 
@@ -271,7 +271,7 @@ This section presents comprehensive experimental validation of the proposed mela
 
 Experiments were conducted using the PH2 dermoscopic image dataset, which contains 200 dermoscopic images (80 common nevi, 80 atypical nevi, 40 melanomas) with expert-annotated ground truth segmentation masks. The dataset provides a balanced representation suitable for evaluating both segmentation and classification performance. All images were preprocessed to 512×512 pixel resolution, and experiments were performed using 5-fold cross-validation to ensure robust performance estimates.
 
-The YOLOv11 classification model was trained separately on a larger dataset (ISIC 2018 subset) and fine-tuned for binary melanoma classification. Model evaluation used standard metrics: accuracy, sensitivity, specificity, precision, and F1-score. Segmentation performance was evaluated using Dice coefficient, Intersection over Union (IoU), precision, recall, and F1-score against ground truth masks.
+The YOLO11 classification model was trained separately on a larger dataset (ISIC 2018 subset) and fine-tuned for binary melanoma classification. Model evaluation used standard metrics: accuracy, sensitivity, specificity, precision, and F1-score. Segmentation performance was evaluated using Dice coefficient, Intersection over Union (IoU), precision, recall, and F1-score against ground truth masks.
 
 Feature extraction validation employed both quantitative metrics (comparing extracted values to manual measurements) and qualitative assessment by comparing system outputs to clinical annotations. Risk scoring was evaluated through correlation analysis with expert-provided risk assessments and receiver operating characteristic (ROC) analysis.
 
@@ -318,7 +318,7 @@ Advanced DIP features provided additional discriminative power. FFT high-frequen
 
 \subsection{Classification and Risk Scoring Performance}
 
-The integrated YOLOv11 classifier, trained on ISIC 2019 and PH2 datasets (approximately 10,000 images), achieved 93\% accuracy, 91.2\% sensitivity, and 94.5\% specificity on the combined test set. These results demonstrate state-of-the-art classification performance while maintaining the advantage of interpretable feature-based risk scoring as a complementary assessment.
+The integrated YOLO11 classifier, trained on ISIC 2019 and PH2 datasets (approximately 10,000 images), achieved 93\% accuracy, 91.2\% sensitivity, and 94.5\% specificity on the combined test set. These results demonstrate state-of-the-art classification performance while maintaining the advantage of interpretable feature-based risk scoring as a complementary assessment.
 
 \begin{table}[htbp]
 \small
@@ -329,7 +329,7 @@ The integrated YOLOv11 classifier, trained on ISIC 2019 and PH2 datasets (approx
 \textbf{Method} & \textbf{Accuracy} & \textbf{Sensitivity} & \textbf{Specificity} & \textbf{Interpretable} \\ \hline
 Color-texture detection (2021) & 98.8\% & 99.4\% & - & No \\ \hline
 Melanoma detection (2023) & 86.6\% & 82.3\% & - & No \\ \hline
-\textbf{Proposed (YOLOv11)} & \textbf{93.0\%} & \textbf{91.2\%} & \textbf{94.5\%} & \textbf{Partial} \\ \hline
+\textbf{Proposed (YOLO11)} & \textbf{93.0\%} & \textbf{91.2\%} & \textbf{94.5\%} & \textbf{Partial} \\ \hline
 \textbf{Proposed (Feature-based)} & \textbf{87.3\%} & \textbf{92.1\%} & \textbf{87.5\%} & \textbf{Yes} \\ \hline
 \end{tabular}
 \label{tab:classification_comparison}

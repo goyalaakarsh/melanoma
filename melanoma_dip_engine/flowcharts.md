@@ -18,7 +18,7 @@ flowchart TD
     H --> J[Segmentation Branch]
     H --> K[Feature Analysis Branch]
     
-    I --> I1[YOLOv11 Model<br/>ISIC 2019 + PH2<br/>10k images]
+    I --> I1[YOLO11 Model<br/>ISIC 2019 + PH2<br/>10k images]
     I1 --> I2[Binary Classification<br/>Melanoma vs Benign]
     I2 --> I3[Confidence Score<br/>Threshold: 0.35]
     
@@ -66,13 +66,13 @@ flowchart TD
     style K1 fill:#DDA0DD
 ```
 
-## 2. Classification Pipeline (YOLOv11)
+## 2. Classification Pipeline (YOLO11)
 
 ```mermaid
 flowchart LR
     A[Input Image<br/>512x512] --> B[Image Preprocessing]
     B --> C[Normalization]
-    C --> D[YOLOv11 Model<br/>Pretrained on ImageNet]
+    C --> D[YOLO11 Model<br/>Pretrained on ImageNet]
     D --> E[Fine-Tuned on<br/>ISIC 2019 + PH2<br/>~10,000 images]
     E --> F[Binary Classification Head]
     F --> G{Melanoma<br/>Probability}
@@ -331,7 +331,7 @@ flowchart TB
     end
     
     subgraph Classification["Classification Branch"]
-        CL1[YOLOv11 Model]
+        CL1[YOLO11 Model]
         CL2[Binary Output]
         CL3[Confidence Score]
     end

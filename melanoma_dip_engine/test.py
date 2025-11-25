@@ -24,13 +24,13 @@ warnings.filterwarnings("ignore")
 # 1. CONFIGURATION
 # Ensemble of two melanoma classifier checkpoints
 # ==============================================================================
-MODEL_CLS_PATH_A = r'melanoma_pipeline_v2/models/melanoma_classifier_opt3.pt'
-MODEL_CLS_PATH_B = r'melanoma_pipeline_v2/models/melanoma_classifier_opt.pt'
+MODEL_CLS_PATH_A = r'melanoma_dip_engine/yolo-models/melanoma_classifier_opt3.pt'
+MODEL_CLS_PATH_B = r'melanoma_dip_engine/yolo-models/melanoma_classifier_opt.pt'
 BENIGN_FOLDER = r"malignant_and_benign/test/benign"
 MELANOMA_FOLDER = r"malignant_and_benign/test/melanoma"
 
 # Sampling
-SAMPLE_SIZE = 10  # Images per class
+SAMPLE_SIZE = 360  # Images per class
 
 # Classification threshold
 THRESHOLD = 0.5  # Standard threshold
